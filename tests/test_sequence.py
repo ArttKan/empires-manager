@@ -3,10 +3,12 @@ import unittest
 from mega_empires.models import PlayerState
 from mega_empires.sequence import (
     PHASES,
+    SURPLUS_SUPPORT_ADVANCES,
     adjacent_phase,
     ast_progress_order,
     movement_order,
     special_ability_order,
+    surplus_support_players,
     trade_card_order,
 )
 
@@ -74,6 +76,29 @@ class SequenceTests(unittest.TestCase):
             advances=["diaspora"],
         )
         self.assertEqual(special_ability_order([no_ability, ability]), [ability])
+
+    def test_surplus_support_list_contains_only_affected_players(self) -> None:
+        agriculture = PlayerState(
+            "Saba",
+            "A",
+            "EAST",
+            advances=["agriculture"],
+        )
+        public_works = PlayerState(
+            "Minoa",
+            "P",
+            "WEST",
+            advances=["public_works"],
+        )
+        ordinary = PlayerState("Assyria", "O", "WEST")
+        self.assertEqual(
+            surplus_support_players([agriculture, ordinary, public_works]),
+            [public_works, agriculture],
+        )
+        self.assertEqual(
+            SURPLUS_SUPPORT_ADVANCES,
+            {"agriculture", "cultural_ascendancy", "public_works"},
+        )
 
     def test_phase_navigation_crosses_turn_boundary(self) -> None:
         self.assertEqual(adjacent_phase(3, 13, 1), (4, 1))

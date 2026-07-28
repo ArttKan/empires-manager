@@ -278,6 +278,8 @@ def ast_era_index(
 # Perussääntöjen sivujen 12–13 ja Additional Scenarios -oppaan sivujen
 # 20–22 viralliset oletuskokoonpanot. Järjestys noudattaa AST-rankingia.
 _WEST_SETUPS = {
+    3: ("Minoa", "Hatti", "Hellas"),
+    4: ("Minoa", "Assyria", "Hatti", "Hellas"),
     5: ("Minoa", "Assyria", "Hatti", "Hellas", "Egypt"),
     6: ("Minoa", "Carthage", "Rome", "Iberia", "Hellas", "Egypt"),
     7: ("Minoa", "Assyria", "Carthage", "Hatti", "Rome", "Hellas", "Egypt"),
@@ -486,7 +488,7 @@ def scenario_civilizations(game_mode: str, player_count: int) -> tuple[str, ...]
         elif game_mode == "EAST":
             message = "The East supports 3–9 players."
         else:
-            message = "The West supports 5–9 players."
+            message = "The West supports 3–9 players."
         raise ValueError(message) from error
 
 

@@ -168,6 +168,8 @@ PHASES = (
             "Then all players simultaneously remove surplus population and "
             "check city support.",
         ),
+        "surplus_support",
+        "Players with advances affecting this phase",
     ),
     Phase(
         12,
@@ -209,6 +211,14 @@ SPECIAL_ABILITY_ADVANCES = frozenset(
         "provincial_empire",
         "trade_routes",
         "universal_doctrine",
+    }
+)
+
+SURPLUS_SUPPORT_ADVANCES = frozenset(
+    {
+        "agriculture",
+        "cultural_ascendancy",
+        "public_works",
     }
 )
 
@@ -270,6 +280,17 @@ def special_ability_order(players: list[PlayerState]) -> list[PlayerState]:
     return ast_progress_order(eligible)
 
 
+def surplus_support_players(players: list[PlayerState]) -> list[PlayerState]:
+    """Palauta vain vaiheen 11 kortteja omistavat A.S.T.-järjestyksessä."""
+
+    eligible = [
+        player
+        for player in players
+        if SURPLUS_SUPPORT_ADVANCES.intersection(player.advances)
+    ]
+    return ast_ranking_order(eligible)
+
+
 def phase_order(phase: Phase, players: list[PlayerState]) -> list[PlayerState]:
     """Laske vaiheen pelaajalista sen määrittämän järjestyssäännön mukaan."""
 
@@ -283,6 +304,8 @@ def phase_order(phase: Phase, players: list[PlayerState]) -> list[PlayerState]:
         return trade_card_order(players)
     if phase.player_order == "special_progress":
         return special_ability_order(players)
+    if phase.player_order == "surplus_support":
+        return surplus_support_players(players)
     return []
 
 

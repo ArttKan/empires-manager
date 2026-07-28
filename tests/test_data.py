@@ -109,9 +109,10 @@ class DataTests(unittest.TestCase):
 
     def test_official_setups_cover_every_player_count(self) -> None:
         for count in range(3, 5):
-            names = scenario_civilizations("EAST", count)
-            self.assertEqual(len(names), count)
-            self.assertEqual(len(set(names)), count)
+            for mode in ("WEST", "EAST"):
+                names = scenario_civilizations(mode, count)
+                self.assertEqual(len(names), count)
+                self.assertEqual(len(set(names)), count)
         for count in range(5, 10):
             for mode in ("WEST", "EAST"):
                 names = scenario_civilizations(mode, count)
@@ -132,6 +133,14 @@ class DataTests(unittest.TestCase):
             {"Indus", "Kushan", "Parthia", "Persia"},
         )
         self.assertEqual(
+            set(scenario_civilizations("WEST", 3)),
+            {"Hellas", "Minoa", "Hatti"},
+        )
+        self.assertEqual(
+            set(scenario_civilizations("WEST", 4)),
+            {"Hellas", "Minoa", "Hatti", "Assyria"},
+        )
+        self.assertEqual(
             set(scenario_civilizations("WEST", 5)),
             {"Minoa", "Assyria", "Hatti", "Hellas", "Egypt"},
         )
@@ -150,6 +159,10 @@ class DataTests(unittest.TestCase):
         self.assertEqual(
             basic_ast_era_starts("Parthia", 4, "EAST"),
             BASIC_AST_ERA_STARTS["Parthia"],
+        )
+        self.assertEqual(
+            basic_ast_era_starts("Minoa", 3, "WEST"),
+            BASIC_AST_ERA_STARTS["Minoa"],
         )
 
     def test_invalid_mode_and_player_count_are_rejected(self) -> None:

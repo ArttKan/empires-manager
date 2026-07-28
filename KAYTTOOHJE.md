@@ -22,8 +22,8 @@ painamalla **New Game**.
 1. Anna tallennettavalle pelille yksilöllinen nimi. Samannimistä aiempaa
    tallennusta ei korvata vahingossa.
 2. Valitse pelaajamäärä väliltä 3–18.
-3. Kun pelaajia on 3–4, ohjelma käyttää automaattisesti The Eastin
-   erikoisskenaariota. Kun pelaajia on 5–9, valitse käytetäänkö The West- vai The East
+3. Kun pelaajia on 3–4, valitse The West- tai The East -kartalla pelattava
+   erikoisskenaario. Kun pelaajia on 5–9, valitse käytetäänkö The West- vai The East
    -pelilaatikkoa. Kun pelaajia on 10–18, ohjelma valitsee automaattisesti
    The West + The East -yhdistelmäpelin.
 4. Ohjelma valitsee pelaajamäärän mukaisen virallisen
@@ -31,10 +31,11 @@ painamalla **New Game**.
 5. Kirjoita jokaisen sivilisaation pelaajan etunimi tai lempinimi.
 6. Viimeisen pelaajan jälkeen pistenäkymä avautuu automaattisesti.
 
-Kolmen pelaajan East-kokoonpano on Indus, Kushan ja Parthia. Neljän pelaajan
-kokoonpano lisää Persian. Ohjelma huomioi myös skenaarion alkukrediitit,
-Parthian kolmen pelaajan Basic A.S.T. -poikkeuksen sekä Market boardin
-olennaiset Sequence of Play -muistutukset.
+Kolmen pelaajan West-kokoonpano on Hellas, Minoa ja Hatti; neljän pelaajan
+kokoonpano lisää Assyrian. East-kokoonpano on kolmella pelaajalla Indus,
+Kushan ja Parthia ja neljällä pelaajalla lisäksi Persia. Ohjelma huomioi
+skenaarion alkukrediitit, Eastin Parthian kolmen pelaajan Basic A.S.T.
+-poikkeuksen sekä molempien karttojen Market board -muistutukset.
 
 Pelaaja näkyy ohjelmassa muodossa `Sivilisaatio (nimi)`.
 
@@ -57,8 +58,11 @@ reunuksella. **Save Advances** hyväksyy muutokset ja **Cancel** hylkää ne.
 Ikkunan yläosan viisi värikenttää näyttävät pelaajan aiemmin tallennetuista
 korteista kertyneet pysyvät krediitit. Viiden pelaajan pelin 10 ja kuuden
 pelaajan pelin 5 aloituskrediittiä per väri lisätään automaattisesti.
-Written Recordin ja Monumentin vapaasti jaettavat krediitit voidaan kohdistaa
-värikenttien **Flexible**-arvoilla sen jälkeen, kun kortit on tallennettu.
+Kun Written Record tai Monument valitaan uutena ostoksena, ohjelma avaa
+automaattisesti kohdistusikkunan. Written Recordin 10 tai Monumentin 20
+krediittipistettä on jaettava kokonaan viiden värin kesken viiden pisteen
+askelin ennen kuin kortti merkitään ostetuksi. Jako tallentuu pelaajan
+**Flexible**-arvoihin.
 
 Ostamattoman kortin oikeassa reunassa näkyy automaattisesti joko sen hinta tai
 muutos muodossa `120 → 90`. Kaksivärisellä kortilla käytetään vain suurempaa
@@ -125,7 +129,47 @@ Avustin käyttää seuraavia pelitietoja:
 - **Movement:** Census laskevasti; A.S.T.-Ranking ratkaisee tasatilanteet.
   Militaryn omistajat liikkuvat kaikkien muiden jälkeen. Vaiheen ohjeissa
   muistutetaan myös alusten liikerajasta, kapasiteetista, rakentamismaksusta,
-  ylläpitomaksusta ja pakollisesta maihinnoususta.
+  ylläpitomaksusta ja pakollisesta maihinnoususta. Affecting Advances
+  -kolumni ja oikea paneeli näyttävät Astronavigation-, Cloth Making-,
+  Naval Warfare-, Roadbuilding-, Military-, Diplomacy-, Cultural Ascendancy-
+  ja Advanced Military -kortit.
+- **Tax Collection:** A.S.T.-järjestyslistan erillinen **Affecting Advances**
+  -kolumni näyttää värillisin lyhentein Coinagen, Democracyn ja Monarchyn
+  omistajat. Samat kortit luetellaan korttiryhmän väreillä oikean paneelin
+  **Affecting Advances** -osiossa.
+- **Conflict:** Affecting Advances -osio näyttää Advanced Military-,
+  Agriculture-, Cultural Ascendancy-, Engineering-, Metalworking- ja
+  Naval Warfare -kortit.
+- **City Construction:** muistuttaa rakentamisrajoista, excess populationin
+  tarkistuksesta ja city supportista. Affecting Advances -osio näyttää
+  Urbanism-, Architecture-, Agriculture-, Cultural Ascendancy- ja
+  Public Works -kortit.
+- **Trade Cards Acquisition:** Affecting Advances -osio näyttää Rhetoric-,
+  Cartography-, Mining- ja Wonder of the World -kortit.
+- **Calamity Selection:** keskipaneeli näyttää kaikki Major Calamityt niiden
+  ratkaisemisjärjestyksessä. Non-Tradeable- ja Tradeable-kortit erotetaan
+  toisistaan eri taustaväreillä. Oikea paneeli näyttää pakkojen 2–9 kaikki
+  Minor Calamityt ja niiden vaikutukset. Kaikkia Major Calamity -rivejä
+  (Stackit 2–9) painamalla avautuvat niiden ratkaisuohjeet. Popupit
+  näyttävät perusvaikutuksen, vaikuttavat Advancet ja niiden nykyiset
+  omistajat sekä tarvittavat ratkaisemisen lisäsäännöt. Volcanic Eruption
+  erottaa Volcanic Eruption- ja Earthquake-vaikutukset. Civil War näyttää
+  lisäksi beneficiaryn valinnan ja yksiköiden valintaprioriteetit.
+  12–18 pelaajan pelissä popupit huomioivat Non-Tradeable Calamityjen oman
+  blockin valintasäännön ja Tradeable Calamityjen mahdollisuuden valita
+  kummasta tahansa blockista.
+- **Special Abilities:** oikea paneeli näyttää kaikki seitsemän Special
+  Ability -korttia. Keskipaneeli näyttää vain niiden omistajat
+  A.S.T.-Progress-järjestyksessä ja pelaajakohtaiset korttibadget.
+- **Surplus Population & City Support:** keskipaneeli näyttää muistutuksena
+  vain Agriculture-, Cultural Ascendancy- tai Public Works -kortin omistavat
+  sivilisaatiot A.S.T.-järjestyksessä sekä heidän korttibadgensa.
+- **Civilization Advances Acquisition:** Affecting Advances -osio näyttää
+  Mining-, Roadbuilding- ja Trade Empire -kortit. Erillinen **Upon Purchase**
+  -osio muistuttaa Anatomy-, Library-, Monument- ja Written Record -korttien
+  kertaluonteisista ostohetken vaikutuksista.
+- **A.S.T.-Alteration:** Wonder of the World näytetään vaikuttavana korttina,
+  koska se lasketaan tämän vaiheen aikana kaupungiksi.
 - **Trade Cards Acquisition:** vähiten kaupunkeja ensin; pelaajat, joilla ei
   ole kaupunkeja, eivät saa kortteja.
 - **Special Abilities:** vain kyseisten Advance-korttien omistajat

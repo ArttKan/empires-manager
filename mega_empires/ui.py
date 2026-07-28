@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .ast_rules import BASIC_AST_REQUIREMENTS, ast_marker_state
+from .calamities import MAJOR_CALAMITIES, MINOR_CALAMITIES
 from .data import (
     ADVANCES,
     ADVANCE_BY_ID,
@@ -30,6 +31,7 @@ from .sequence import (
     PHASES,
     PHASE_BY_NUMBER,
     SPECIAL_ABILITY_ADVANCES,
+    SURPLUS_SUPPORT_ADVANCES,
     Phase,
     adjacent_phase,
     phase_order,
@@ -79,19 +81,35 @@ ADVANCE_GROUP_LABELS = {
     "SCIENCE": "Sciences",
 }
 
+
+def _valid_credit_allocation(values: dict[str, int], amount: int) -> bool:
+    return (
+        sum(values.get(group, 0) for group in ADVANCE_GROUPS) == amount
+        and all(
+            values.get(group, 0) >= 0 and values.get(group, 0) % 5 == 0
+            for group in ADVANCE_GROUPS
+        )
+    )
+
 # Basic Rulebookin takasivun tiivistetyt oletusarvot.
 DEFAULT_RULES_VALUES = (
     ("1  Tax", "2 tokens per city: stock → treasury"),
     ("2  Expansion", "1 token → +1  •  2+ tokens → +2"),
-    ("3  Movement", "Token: 1 area  •  Ship: up to 4 water areas"),
+    ("3  Movement", "Token: 1 area or into a ship"),
+    ("", "Ship: up to 4 water areas"),
     ("", "A token moves by land or ship, never both"),
     ("", "Ship capacity 5  •  No open sea by default"),
     ("", "All carried tokens disembark after the ship's final step"),
     ("", "New ship: 2 tokens / 2 treasury / 1 + 1"),
     ("", "Maintain ship: 1 token or 1 treasury"),
-    ("4  Conflict", "Minority removes first  •  City attack: 7"),
-    ("", "Captured city → 6 tokens  •  Gain up to 3 treasury"),
+    ("4  Conflict", "Resolve all token conflicts before city attacks"),
+    ("", "Minority removes first  •  Equal counts remove simultaneously"),
+    ("", "A successful city attack requires at least 7 tokens"),
+    ("", "Successful attack: replace the city with 6 tokens"),
+    ("", "Draw 1 random trade card and gain up to 3 treasury"),
     ("5  Cities", "City site: 6 tokens  •  Wilderness: 12"),
+    ("", 'Cities cannot be built in printed "0" population-limit areas'),
+    ("", "Check all areas for excess population"),
     ("", "City support: 2 tokens per city"),
     ("6  Cards", "Stack #9 purchase: 15 treasury"),
     ("7  Trade", "At least 3 cards  •  First 2 named are true"),
@@ -99,12 +117,84 @@ DEFAULT_RULES_VALUES = (
     ("8  Selection", "Max 3 calamities; max 2 Major"),
     ("9  Resolution", "Token = 1 damage  •  City = 5 damage"),
     ("10  Abilities", "Use all Special Abilities in any order"),
-    ("11  Support", "Remove surplus  •  Support: 2 per city"),
+    ("11  Support", "Check all areas for excess population"),
+    ("", "City support: 2 tokens per city"),
     ("12  Advances", "Hand limit: 8 cards (5–11 players)"),
     ("", "Hand limit: 9 cards (12–18 players)"),
     ("13  A.S.T.", "Basic, 0 cities: freeze outside Stone Age"),
     ("", "Expert, 0 cities: move back 1 outside Stone Age"),
 )
+
+# Vaihekohtaiset suoraan vaikuttavat kortit ja pelaajalistan lyhenteet.
+PHASE_AFFECTING_ADVANCES = {
+    1: (
+        ("coinage", "COI"),
+        ("democracy", "DEM"),
+        ("monarchy", "MON"),
+    ),
+    3: (
+        ("astronavigation", "ASN"),
+        ("cloth_making", "CLO"),
+        ("naval_warfare", "NAV"),
+        ("roadbuilding", "RDB"),
+        ("military", "MIL"),
+        ("diplomacy", "DIP"),
+        ("cultural_ascendancy", "CUL"),
+        ("advanced_military", "AMI"),
+    ),
+    4: (
+        ("advanced_military", "AMI"),
+        ("agriculture", "AGR"),
+        ("cultural_ascendancy", "CUL"),
+        ("engineering", "ENG"),
+        ("metalworking", "MET"),
+        ("naval_warfare", "NAV"),
+    ),
+    5: (
+        ("urbanism", "URB"),
+        ("architecture", "ARC"),
+        ("agriculture", "AGR"),
+        ("cultural_ascendancy", "CUL"),
+        ("public_works", "PUB"),
+    ),
+    6: (
+        ("rhetoric", "RHE"),
+        ("cartography", "CAR"),
+        ("mining", "MIN"),
+        ("wonder_of_the_world", "WON"),
+    ),
+    10: (
+        ("diaspora", "DIA"),
+        ("fundamentalism", "FUN"),
+        ("monotheism", "MTH"),
+        ("politics", "POL"),
+        ("provincial_empire", "PRO"),
+        ("trade_routes", "TRD"),
+        ("universal_doctrine", "UND"),
+    ),
+    11: (
+        ("agriculture", "AGR"),
+        ("cultural_ascendancy", "CUL"),
+        ("public_works", "PUB"),
+    ),
+    12: (
+        ("mining", "MIN"),
+        ("roadbuilding", "RDB"),
+        ("trade_empire", "TEM"),
+    ),
+    13: (
+        ("wonder_of_the_world", "WON"),
+    ),
+}
+
+PHASE_UPON_PURCHASE_ADVANCES = {
+    12: (
+        ("anatomy", "ANA"),
+        ("library", "LIB"),
+        ("monument", "MON"),
+        ("written_record", "WRI"),
+    ),
+}
 
 
 def _configure_styles(root: tk.Tk) -> None:
@@ -114,7 +204,7 @@ def _configure_styles(root: tk.Tk) -> None:
     style.configure(".", font=("Segoe UI", 11))
     style.configure("TFrame", background=BACKGROUND)
     style.configure("TLabel", background=BACKGROUND, foreground=TEXT)
-    style.configure("Title.TLabel", font=("Segoe UI Semibold", 25), foreground=TEXT)
+    style.configure("Title.TLabel", font=("Segoe UI Semibold", 23), foreground=TEXT)
     style.configure("Subtitle.TLabel", font=("Segoe UI", 12), foreground=MUTED)
     style.configure(
         "TButton",
@@ -246,12 +336,16 @@ class NewGameWizard(tk.Toplevel):
     def _update_mode_rules(self, _event: object | None = None) -> None:
         count = self.player_count.get()
         if count in {3, 4}:
-            self.game_mode.set("EAST")
-            self.mode_buttons["WEST"].state(["disabled"])
+            if self.game_mode.get() not in {"WEST", "EAST"}:
+                self.game_mode.set("WEST")
+            self.mode_buttons["WEST"].state(["!disabled"])
             self.mode_buttons["EAST"].state(["!disabled"])
             self.mode_buttons["BOTH"].state(["disabled"])
             self.mode_note.configure(
-                text="The 3–4 player special scenario uses The East."
+                text=(
+                    "For 3–4 players, choose The West or The East map. "
+                    "Both use the special Market board scenario."
+                )
             )
         elif count >= 10:
             self.game_mode.set("BOTH")
@@ -409,6 +503,122 @@ class NewGameWizard(tk.Toplevel):
             self._show_player()
 
 
+class FlexibleCreditDialog(tk.Toplevel):
+    """Written Recordin tai Monumentin krediittien pakollinen kohdistus."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        advance_name: str,
+        amount: int,
+    ) -> None:
+        super().__init__(parent)
+        self.result: dict[str, int] | None = None
+        self.amount = amount
+        self.title(f"Assign Credits – {advance_name}")
+        self.configure(background=BACKGROUND)
+        self.geometry("620x430")
+        self.resizable(False, False)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+        self.variables = {
+            group: tk.IntVar(value=0)
+            for group in ADVANCE_GROUPS
+        }
+
+        outer = ttk.Frame(self, padding=30)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(
+            outer,
+            text=f"Assign {amount} Credit Tokens",
+            style="Title.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            outer,
+            text=(
+                f"{advance_name} grants {amount} credit points in any "
+                "combination of colors. The full amount must be assigned now."
+            ),
+            style="Subtitle.TLabel",
+            wraplength=550,
+        ).pack(anchor="w", pady=(5, 20))
+
+        colors = tk.Frame(outer, background=BACKGROUND)
+        colors.pack(fill="x")
+        for group in ADVANCE_GROUPS:
+            color = ADVANCE_GROUP_COLORS[group]
+            foreground = (
+                "#ffffff" if group in {"ART", "CIVIC"} else "#101010"
+            )
+            block = tk.Frame(colors, background=color, padx=8, pady=10)
+            block.pack(side="left", fill="x", expand=True, padx=(0, 5))
+            tk.Label(
+                block,
+                text=ADVANCE_GROUP_LABELS[group],
+                font=("Segoe UI Semibold", 9),
+                background=color,
+                foreground=foreground,
+            ).pack()
+            tk.Spinbox(
+                block,
+                from_=0,
+                to=amount,
+                increment=5,
+                width=3,
+                textvariable=self.variables[group],
+                command=self._refresh_status,
+                justify="center",
+                font=("Segoe UI Semibold", 11),
+            ).pack(pady=(7, 0))
+
+        self.status = ttk.Label(outer, style="Subtitle.TLabel")
+        self.status.pack(anchor="w", pady=(16, 0))
+        self._refresh_status()
+
+        buttons = ttk.Frame(outer)
+        buttons.pack(side="bottom", fill="x")
+        ttk.Button(
+            buttons,
+            text="Cancel",
+            command=self.destroy,
+        ).pack(side="left")
+        ttk.Button(
+            buttons,
+            text="Save Credit Tokens",
+            style="Accent.TButton",
+            command=self._accept,
+        ).pack(side="right")
+
+    def _values(self) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for group, variable in self.variables.items():
+            try:
+                values[group] = max(0, int(variable.get()))
+            except (tk.TclError, ValueError):
+                values[group] = 0
+        return values
+
+    def _refresh_status(self) -> None:
+        assigned = sum(self._values().values())
+        self.status.configure(
+            text=f"Assigned: {assigned} / {self.amount} credit points"
+        )
+
+    def _accept(self) -> None:
+        values = self._values()
+        if not _valid_credit_allocation(values, self.amount):
+            messagebox.showerror(
+                "Assign all credit points",
+                f"Assign exactly {self.amount} credit points in multiples "
+                "of 5.",
+                parent=self,
+            )
+            return
+        self.result = values
+        self.grab_release()
+        self.destroy()
+
+
 class AdvanceDialog(tk.Toplevel):
     def __init__(
         self,
@@ -441,6 +651,7 @@ class AdvanceDialog(tk.Toplevel):
         self.credit_value_labels: dict[str, tk.Label] = {}
         self.choice_drawers: list[Callable[[], None]] = []
         self.flexible_status_label: ttk.Label | None = None
+        self.pending_flexible_allocations: dict[str, dict[str, int]] = {}
         outer = ttk.Frame(self, padding=24)
         outer.pack(fill="both", expand=True)
         ttk.Label(
@@ -730,8 +941,25 @@ class AdvanceDialog(tk.Toplevel):
 
         def toggle(_event: object | None = None) -> str:
             variable = self.variables[advance.id]
-            variable.set(not variable.get())
-            draw()
+            selecting = not variable.get()
+            if (
+                selecting
+                and advance.id not in self.player.advances
+                and advance.id in {"written_record", "monument"}
+            ):
+                allocation = self._request_flexible_allocation(advance)
+                if allocation is None:
+                    return "break"
+                self.pending_flexible_allocations[advance.id] = allocation
+                self._adjust_flexible_credits(allocation, 1)
+            elif (
+                not selecting
+                and advance.id in self.pending_flexible_allocations
+            ):
+                allocation = self.pending_flexible_allocations.pop(advance.id)
+                self._adjust_flexible_credits(allocation, -1)
+            variable.set(selecting)
+            self._refresh_credit_display()
             return "break"
 
         canvas.bind("<Configure>", draw)
@@ -741,6 +969,26 @@ class AdvanceDialog(tk.Toplevel):
         self.choice_drawers.append(draw)
         draw()
         return canvas
+
+    def _request_flexible_allocation(
+        self,
+        advance: Advance,
+    ) -> dict[str, int] | None:
+        amount = 10 if advance.id == "written_record" else 20
+        dialog = FlexibleCreditDialog(self, advance.name, amount)
+        self.wait_window(dialog)
+        self.grab_set()
+        return dialog.result
+
+    def _adjust_flexible_credits(
+        self,
+        allocation: dict[str, int],
+        direction: int,
+    ) -> None:
+        for group in ADVANCE_GROUPS:
+            current = max(0, int(self.flexible_vars[group].get()))
+            change = int(allocation.get(group, 0)) * direction
+            self.flexible_vars[group].set(max(0, current + change))
 
     def _save(self) -> None:
         selected_advances = [
@@ -1049,6 +1297,1041 @@ class SavedGameDialog(tk.Toplevel):
         path = self.saves[int(selection[0])].path
         self._close()
         self.on_open(path)
+
+
+def _add_current_advance_holders(
+    parent: tk.Widget,
+    game: GameState,
+    advance_ids: tuple[str, ...],
+    *,
+    table_height: int = 4,
+) -> None:
+    """Lisää popupiin nykyisestä pelitilanteesta laskettu omistajalista."""
+
+    section = tk.Frame(parent, background=PANEL_ALT)
+    section.pack(fill="x", pady=5)
+    tk.Label(
+        section,
+        text="CURRENT HOLDERS",
+        anchor="w",
+        font=("Segoe UI Semibold", 11),
+        background="#3d536d",
+        foreground="#ffffff",
+        padx=12,
+        pady=7,
+    ).pack(fill="x")
+
+    holders = []
+    for player in game.players:
+        owned = [
+            ADVANCE_BY_ID[advance_id].name
+            for advance_id in advance_ids
+            if advance_id in player.advances
+        ]
+        if owned:
+            holders.append(
+                (player.display_name, player.block, ", ".join(owned))
+            )
+    if not holders:
+        tk.Label(
+            section,
+            text="No player currently holds an affecting Advance.",
+            anchor="w",
+            font=("Segoe UI", 10),
+            background=PANEL_ALT,
+            foreground=MUTED,
+            padx=12,
+            pady=9,
+        ).pack(fill="x")
+        return
+
+    table_frame = tk.Frame(section, background=PANEL_ALT)
+    table_frame.pack(fill="x", padx=8, pady=7)
+    table = ttk.Treeview(
+        table_frame,
+        columns=("player", "block", "advances"),
+        show="headings",
+        height=min(table_height, len(holders)),
+    )
+    table.heading("player", text="Civilization / Player")
+    table.heading("block", text="Block")
+    table.heading("advances", text="Advances")
+    table.column("player", width=150, stretch=False)
+    table.column("block", width=55, anchor="center", stretch=False)
+    table.column("advances", width=230, stretch=True)
+    scrollbar = ttk.Scrollbar(
+        table_frame,
+        orient="vertical",
+        command=table.yview,
+    )
+    table.configure(yscrollcommand=scrollbar.set)
+    table.pack(side="left", fill="x", expand=True)
+    scrollbar.pack(side="right", fill="y")
+    for holder in holders:
+        table.insert("", "end", values=holder)
+
+
+class VolcanicEruptionDialog(tk.Toplevel):
+    """Volcanic Eruption -kortin ratkaisuohje."""
+
+    def __init__(self, parent: tk.Widget, game: GameState) -> None:
+        super().__init__(parent)
+        self.title("Major Calamity – Volcanic Eruption")
+        self.configure(background=BACKGROUND)
+        self.geometry("860x880")
+        self.minsize(760, 800)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+
+        outer = tk.Frame(self, background=BACKGROUND, padx=30, pady=24)
+        outer.pack(fill="both", expand=True)
+
+        heading = tk.Frame(outer, background=BACKGROUND)
+        heading.pack(fill="x")
+        tk.Label(
+            heading,
+            text="VOLCANIC ERUPTION",
+            anchor="w",
+            font=("Segoe UI Semibold", 24),
+            background=BACKGROUND,
+            foreground=TEXT,
+        ).pack(side="left")
+        tk.Label(
+            heading,
+            text="STACK 2  •  NON-TRADEABLE",
+            font=("Segoe UI Semibold", 10),
+            background="#713747",
+            foreground="#ffffff",
+            padx=12,
+            pady=6,
+        ).pack(side="right")
+
+        decision = tk.Frame(outer, background=ACCENT, padx=16, pady=12)
+        decision.pack(fill="x", pady=(16, 14))
+        tk.Label(
+            decision,
+            text="FIRST: DETERMINE WHICH EFFECT APPLIES",
+            anchor="w",
+            font=("Segoe UI Semibold", 12),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x")
+        tk.Label(
+            decision,
+            text=(
+                "Do you have a city in an area touched by a volcano?\n"
+                "YES → Resolve Volcanic Eruption.    "
+                "NO → Resolve Earthquake."
+            ),
+            anchor="w",
+            justify="left",
+            font=("Segoe UI Semibold", 13),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x", pady=(5, 0))
+
+        self._add_rule_section(
+            outer,
+            "VOLCANIC ERUPTION",
+            (
+                "Destroy every unit, regardless of ownership, in both areas "
+                "touched by the selected volcano.",
+                "If your cities touch more than one volcano, select the one "
+                "that affects the most of your own unit points.",
+                "The map has 3 volcanoes. Each lies on the border of 2 areas, "
+                "and both areas are affected.",
+            ),
+            "#713747",
+        )
+        self._add_rule_section(
+            outer,
+            "EARTHQUAKE",
+            (
+                "Select and destroy 1 of your cities.",
+                "Then select and reduce 1 city adjacent by land or water. "
+                "This city may belong to any player.",
+                "If the only possible adjacent city is another one of your "
+                "cities, you must select it.",
+            ),
+            "#315b79",
+        )
+
+        advance = tk.Frame(outer, background="#2d4936", padx=14, pady=10)
+        advance.pack(fill="x", pady=(10, 0))
+        tk.Label(
+            advance,
+            text="AFFECTING ADVANCE  •  ENGINEERING",
+            anchor="w",
+            font=("Segoe UI Semibold", 11),
+            background="#2d4936",
+            foreground="#bfe8c8",
+        ).pack(fill="x")
+        tk.Label(
+            advance,
+            text=(
+                "Earthquake only: your selected city is reduced instead of "
+                "destroyed."
+            ),
+            anchor="w",
+            justify="left",
+            font=("Segoe UI", 11),
+            background="#2d4936",
+            foreground=TEXT,
+        ).pack(fill="x", pady=(3, 0))
+        _add_current_advance_holders(
+            outer,
+            game,
+            ("engineering",),
+            table_height=3,
+        )
+        if game.player_count >= 12:
+            scenario = tk.Frame(
+                outer,
+                background="#563d67",
+                padx=14,
+                pady=10,
+            )
+            scenario.pack(fill="x", pady=(5, 0))
+            tk.Label(
+                scenario,
+                text="12–18 PLAYER SCENARIO",
+                anchor="w",
+                font=("Segoe UI Semibold", 11),
+                background="#563d67",
+                foreground="#ffffff",
+            ).pack(fill="x")
+            tk.Label(
+                scenario,
+                text=(
+                    "Collateral damage is determined by the selected volcano "
+                    "areas and may affect units from either block."
+                ),
+                anchor="w",
+                justify="left",
+                wraplength=740,
+                font=("Segoe UI", 10),
+                background="#563d67",
+                foreground=TEXT,
+            ).pack(fill="x", pady=(3, 0))
+
+        ttk.Button(
+            outer,
+            text="Close",
+            style="Accent.TButton",
+            command=self.destroy,
+        ).pack(side="bottom", anchor="e", pady=(14, 0))
+        self.bind("<Escape>", lambda _event: self.destroy())
+
+    @staticmethod
+    def _add_rule_section(
+        parent: tk.Widget,
+        title: str,
+        rules: tuple[str, ...],
+        color: str,
+    ) -> None:
+        section = tk.Frame(parent, background=PANEL_ALT)
+        section.pack(fill="x", pady=5)
+        tk.Label(
+            section,
+            text=title,
+            width=22,
+            anchor="nw",
+            font=("Segoe UI Semibold", 13),
+            background=color,
+            foreground="#ffffff",
+            padx=12,
+            pady=12,
+        ).pack(side="left", fill="y")
+        rules_panel = tk.Frame(section, background=PANEL_ALT, padx=14, pady=8)
+        rules_panel.pack(side="left", fill="both", expand=True)
+        for rule in rules:
+            tk.Label(
+                rules_panel,
+                text=f"•  {rule}",
+                anchor="nw",
+                justify="left",
+                wraplength=570,
+                font=("Segoe UI", 11),
+                background=PANEL_ALT,
+                foreground=TEXT,
+            ).pack(fill="x", pady=2)
+
+
+class CivilWarDialog(tk.Toplevel):
+    """Civil War -kortin pitkä ratkaisuohje."""
+
+    AFFECTING_ADVANCES = (
+        ("music", "Music"),
+        ("drama_and_poetry", "Drama and Poetry"),
+        ("democracy", "Democracy"),
+        ("philosophy", "Philosophy"),
+        ("military", "Military"),
+    )
+
+    def __init__(self, parent: tk.Widget, game: GameState) -> None:
+        super().__init__(parent)
+        self.title("Major Calamity – Civil War")
+        self.configure(background=BACKGROUND)
+        self.geometry("1040x850")
+        self.minsize(940, 780)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+
+        outer = tk.Frame(self, background=BACKGROUND, padx=30, pady=24)
+        outer.pack(fill="both", expand=True)
+
+        heading = tk.Frame(outer, background=BACKGROUND)
+        heading.pack(fill="x")
+        tk.Label(
+            heading,
+            text="CIVIL WAR",
+            anchor="w",
+            font=("Segoe UI Semibold", 24),
+            background=BACKGROUND,
+            foreground=TEXT,
+        ).pack(side="left")
+        tk.Label(
+            heading,
+            text="STACK 5  •  NON-TRADEABLE",
+            font=("Segoe UI Semibold", 10),
+            background="#713747",
+            foreground="#ffffff",
+            padx=12,
+            pady=6,
+        ).pack(side="right")
+
+        core = tk.Frame(outer, background=ACCENT, padx=16, pady=12)
+        core.pack(fill="x", pady=(16, 12))
+        tk.Label(
+            core,
+            text="CORE EFFECT",
+            anchor="w",
+            font=("Segoe UI Semibold", 12),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x")
+        tk.Label(
+            core,
+            text=(
+                "Count all your unit points on the board. If the adjusted "
+                "amount to be selected is greater than 0, the beneficiary "
+                "annexes your selected units in excess of 35 unit points. "
+                "You choose the units. With 35 unit points or fewer, there "
+                "is no Civil War."
+            ),
+            anchor="w",
+            justify="left",
+            wraplength=930,
+            font=("Segoe UI Semibold", 12),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x", pady=(5, 0))
+
+        columns = tk.Frame(outer, background=BACKGROUND)
+        columns.pack(fill="both", expand=True)
+        left = tk.Frame(columns, background=BACKGROUND)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right = tk.Frame(columns, background=BACKGROUND)
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        self._add_section(
+            left,
+            "AFFECTING ADVANCES",
+            (
+                "Music: select 5 fewer unit points.",
+                "Drama and Poetry: select 5 fewer unit points.",
+                "Democracy: select 10 fewer unit points.",
+                "Philosophy: select 5 additional unit points.",
+                "Military: select 5 additional unit points.",
+            ),
+            "#2d4936",
+        )
+        _add_current_advance_holders(
+            left,
+            game,
+            tuple(
+                advance_id
+                for advance_id, _name in self.AFFECTING_ADVANCES
+            ),
+            table_height=5,
+        )
+        self._add_section(
+            left,
+            "SELECTING THE UNITS",
+            (
+                "First calculate the required amount: all your unit points "
+                "minus 35, adjusted by your Advances.",
+                "Select complete areas: all of your units in each selected "
+                "area must be included.",
+                "Selected areas must be adjacent to one another if possible.",
+            ),
+            PANEL_ALT,
+        )
+        beneficiary_rules = []
+        if game.player_count >= 12:
+            beneficiary_rules.extend(
+                (
+                    "12–18 players: first restrict eligible beneficiaries "
+                    "to the primary victim's own block (WEST → WEST or "
+                    "EAST → EAST).",
+                    "Determine all primary victims and beneficiaries before "
+                    "resolving any calamities.",
+                )
+            )
+        beneficiary_rules.extend(
+            (
+                "Of the eligible players, the beneficiary is the other "
+                "player with the most cities in stock.",
+                "Break a tie by most tokens in stock, then by A.S.T.-Ranking.",
+                "The primary victim cannot be the beneficiary.",
+            )
+        )
+        self._add_section(
+            right,
+            "BENEFICIARY",
+            tuple(beneficiary_rules),
+            "#315b79",
+        )
+        self._add_section(
+            right,
+            "IF AN EXACT SELECTION IS IMPOSSIBLE",
+            (
+                "Break the rules only as necessary, using this priority:",
+                "1. Select all your units in every selected area.",
+                "2. Keep the selected areas adjacent.",
+                "3. Match the required number of unit points exactly.",
+                "4. Select only units the beneficiary can annex.",
+            ),
+            "#563d67",
+        )
+        self._add_section(
+            right,
+            "INSUFFICIENT STOCK",
+            (
+                "The beneficiary annexes as many selected units as their "
+                "stock permits.",
+                "Replace the remainder with pirate cities and/or barbarian "
+                "tokens.",
+            ),
+            "#6b4d2f",
+        )
+
+        buttons = tk.Frame(outer, background=BACKGROUND)
+        buttons.pack(fill="x", pady=(12, 0))
+        tk.Label(
+            buttons,
+            text="Resolve all adjustments before choosing units.",
+            anchor="w",
+            font=("Segoe UI Semibold", 10),
+            background=BACKGROUND,
+            foreground=MUTED,
+        ).pack(side="left")
+        ttk.Button(
+            buttons,
+            text="Close",
+            style="Accent.TButton",
+            command=self.destroy,
+        ).pack(side="right")
+        self.bind("<Escape>", lambda _event: self.destroy())
+
+    @staticmethod
+    def _add_section(
+        parent: tk.Widget,
+        title: str,
+        rules: tuple[str, ...],
+        title_color: str,
+    ) -> None:
+        section = tk.Frame(parent, background=PANEL_ALT)
+        section.pack(fill="x", pady=5)
+        tk.Label(
+            section,
+            text=title,
+            anchor="w",
+            font=("Segoe UI Semibold", 11),
+            background=title_color,
+            foreground="#ffffff",
+            padx=12,
+            pady=7,
+        ).pack(fill="x")
+        for rule in rules:
+            tk.Label(
+                section,
+                text=f"•  {rule}" if not rule[:2].rstrip(".").isdigit() else rule,
+                anchor="nw",
+                justify="left",
+                wraplength=420,
+                font=("Segoe UI", 10),
+                background=PANEL_ALT,
+                foreground=TEXT,
+                padx=12,
+                pady=3,
+            ).pack(fill="x")
+
+
+CALAMITY_DIALOG_SPECS = {
+    "Treachery": {
+        "stack": 2,
+        "tradeable": True,
+        "core": "The beneficiary selects and annexes 1 of your cities.",
+        "advances": (
+            (
+                "diplomacy",
+                "Diplomacy: the beneficiary selects and annexes 1 additional "
+                "city.",
+            ),
+        ),
+        "details": (
+            "If the beneficiary has insufficient cities in stock, replace "
+            "the remainder with pirate cities.",
+        ),
+        "scenario": "In a 12–18 player game, a Tradeable Calamity beneficiary "
+        "may belong to either block.",
+        "beneficiary": (
+            "Use the last player who traded this calamity. If it was not "
+            "traded or cannot be traced, use the eligible player with most "
+            "cities in stock; break ties by tokens in stock, then "
+            "A.S.T.-Ranking.",
+        ),
+    },
+    "Famine": {
+        "stack": 3,
+        "tradeable": False,
+        "core": "Take 10 damage and assign 5 damage to each of 3 other players.",
+        "advances": (
+            (
+                "agriculture",
+                "Agriculture: the primary victim takes 5 additional damage.",
+            ),
+            ("pottery", "Pottery: prevent 5 damage."),
+            ("calendar", "Calendar: prevent 5 damage."),
+        ),
+        "details": (
+            "Even if the primary victim prevents all damage, Famine is not "
+            "canceled.",
+            "A player who can prevent their damage may still be selected as "
+            "a secondary victim.",
+        ),
+        "scenario": "In a 12–18 player game, secondary victims of this "
+        "Non-Tradeable Calamity must be selected from the primary victim's "
+        "own block.",
+    },
+    "Slave Revolt": {
+        "stack": 3,
+        "tradeable": True,
+        "core": "Immediately perform an additional city-support check. "
+        "Increase your city-support rate by 2 and reduce cities until you "
+        "have sufficient support.",
+        "advances": (
+            (
+                "mythology",
+                "Mythology: decrease the Slave Revolt support rate by 1.",
+            ),
+            (
+                "enlightenment",
+                "Enlightenment: decrease the Slave Revolt support rate by 1.",
+            ),
+            (
+                "mining",
+                "Mining: increase the Slave Revolt support rate by 1.",
+            ),
+            (
+                "cultural_ascendancy",
+                "Cultural Ascendancy: the default support rate is 3 and is "
+                "still increased by 2 for Slave Revolt.",
+            ),
+        ),
+        "details": (
+            "The default city-support rate is 2 before applying the Slave "
+            "Revolt increase and Advance modifiers.",
+            "Tokens gained by reducing a city during this resolution may "
+            "immediately be used for city support.",
+        ),
+        "scenario": "",
+    },
+    "Flood": {
+        "stack": 4,
+        "tradeable": False,
+        "core": "If you have units on a flood plain, take 15 damage from one "
+        "flood plain. Otherwise take 5 damage in total from coastal areas "
+        "of your choice.",
+        "advances": (
+            ("engineering", "Engineering: prevent 5 damage."),
+        ),
+        "details": (
+            "If more than one flood plain contains your units, select the "
+            "one that affects the most of your units.",
+            "Every other player with units on the selected flood plain takes "
+            "5 damage from that flood plain.",
+            "Tokens, wilderness cities and cities on white city sites count "
+            "as being on a flood plain.",
+            "Cities on black city sites are not considered to be on a flood "
+            "plain.",
+        ),
+        "scenario": "In a 12–18 player game, collateral damage caused by the "
+        "selected flood plain may affect players from either block.",
+    },
+    "Superstition": {
+        "stack": 4,
+        "tradeable": True,
+        "core": "Reduce 3 of your cities.",
+        "advances": (
+            ("mysticism", "Mysticism: reduce 1 fewer city."),
+            ("deism", "Deism: reduce 1 fewer city."),
+            ("enlightenment", "Enlightenment: reduce 1 fewer city."),
+            (
+                "universal_doctrine",
+                "Universal Doctrine: reduce 1 additional city.",
+            ),
+        ),
+        "details": (),
+        "scenario": "",
+    },
+    "Barbarian Hordes": {
+        "stack": 5,
+        "tradeable": True,
+        "core": "The beneficiary attacks one of your cities with 15 barbarian "
+        "tokens. If possible, the beneficiary must select a wilderness city.",
+        "advances": (
+            ("monarchy", "Monarchy: use 5 fewer barbarian tokens."),
+            ("politics", "Politics: use 5 additional barbarian tokens."),
+            (
+                "provincial_empire",
+                "Provincial Empire: use 5 additional barbarian tokens.",
+            ),
+            (
+                "universal_doctrine",
+                "Universal Doctrine may later annex barbarian tokens that "
+                "remain on the board.",
+            ),
+        ),
+        "details": (
+            "Resolve the city attack. The beneficiary then moves all "
+            "barbarians above the population limit to an adjacent area by "
+            "land or water that contains the victim's units, and resolves "
+            "another conflict.",
+            "Repeat until no barbarian population limit is exceeded or no "
+            "new area can be chosen legally. Destroy any remaining excess.",
+            "Barbarians may enter a city area only if the attack would "
+            "succeed. Do not consider potential strategic choices from the "
+            "victim's Advances when checking this.",
+            "Other players' tokens in an attacked area join the conflict.",
+            "Barbarians may cross sea borders, but not open sea areas, and "
+            "may not skip an area.",
+            "Barbarians gain no Advance attributes from the beneficiary and "
+            "are unaffected by Cultural Ascendancy or Diplomacy.",
+            "Do not draw trade cards for their successful city attacks.",
+            "Barbarian tokens remain until destroyed in conflict or annexed "
+            "with Universal Doctrine.",
+        ),
+        "scenario": "In a 12–18 player game, the beneficiary of this "
+        "Tradeable Calamity may belong to either block. Collateral conflicts "
+        "may also affect either block.",
+        "beneficiary": (
+            "Use the last player who traded this calamity. If it was not "
+            "traded or cannot be traced, use the eligible player with most "
+            "cities in stock; break ties by tokens in stock, then "
+            "A.S.T.-Ranking.",
+        ),
+    },
+    "Cyclone": {
+        "stack": 6,
+        "tradeable": False,
+        "core": "The open sea area with the most of your cities directly "
+        "adjacent becomes the Cyclone area. Select 3 of your adjacent cities; "
+        "every other player with adjacent cities selects 2 of them. Reduce "
+        "all selected cities.",
+        "advances": (
+            (
+                "trade_empire",
+                "Trade Empire: select 1 additional city adjacent to the "
+                "Cyclone area.",
+            ),
+            ("masonry", "Masonry: after selecting, deselect 1 city."),
+            ("calendar", "Calendar: after selecting, deselect 2 cities."),
+        ),
+        "details": (
+            "The primary victim chooses the Cyclone area if several open sea "
+            "areas are tied.",
+            "Cancel Cyclone if the primary victim has no city directly "
+            "adjacent to an open sea area before prevention effects.",
+            "Masonry and Calendar may prevent reductions, but do not cancel "
+            "Cyclone or its effects on other players.",
+        ),
+        "scenario": "In a 12–18 player game, collateral effects caused by "
+        "selecting the Cyclone area may affect players from either block.",
+    },
+    "Epidemic": {
+        "stack": 6,
+        "tradeable": True,
+        "core": "Take 15 damage and select 2 other players who each take "
+        "10 damage. The beneficiary may not be selected as a secondary "
+        "victim.",
+        "advances": (
+            ("medicine", "Medicine: prevent 5 damage."),
+            (
+                "enlightenment",
+                "Enlightenment: the primary victim prevents 5 damage.",
+            ),
+            (
+                "anatomy",
+                "Anatomy: a secondary victim prevents 5 damage.",
+            ),
+            (
+                "roadbuilding",
+                "Roadbuilding: the primary victim takes 5 additional damage.",
+            ),
+            (
+                "trade_empire",
+                "Trade Empire: the primary victim takes 5 additional damage.",
+            ),
+        ),
+        "details": (
+            "Determine the beneficiary and both secondary victims before "
+            "resolving the damage.",
+            "A player cannot be selected as a secondary victim if they are "
+            "already a primary victim, secondary victim or beneficiary of "
+            "another Epidemic this turn.",
+        ),
+        "scenario": "In a 12–18 player game, the beneficiary and secondary "
+        "victims of this Tradeable Calamity may be selected from either "
+        "block.",
+        "beneficiary": (
+            "Use the last player who traded this calamity. If it was not "
+            "traded or cannot be traced, use the eligible player with most "
+            "cities in stock; break ties by tokens in stock, then "
+            "A.S.T.-Ranking.",
+        ),
+    },
+    "Tyranny": {
+        "stack": 7,
+        "tradeable": False,
+        "core": "The beneficiary selects and annexes 15 of your unit points. "
+        "Selected areas must be adjacent if possible, and all of your units "
+        "in every selected area must be included.",
+        "advances": (
+            ("sculpture", "Sculpture: annex 5 fewer unit points."),
+            ("law", "Law: annex 5 fewer unit points."),
+            ("monarchy", "Monarchy: annex 5 additional unit points."),
+            (
+                "provincial_empire",
+                "Provincial Empire: annex 5 additional unit points.",
+            ),
+        ),
+        "details": (
+            "If an exact selection is impossible, preserve these rules in "
+            "order: (1) all victim units in each selected area, (2) adjacent "
+            "areas, (3) exact unit-point total, (4) beneficiary can annex "
+            "the entire selection.",
+            "If the beneficiary lacks stock, annex as many selected units as "
+            "possible and replace the remainder with pirate cities and/or "
+            "barbarian tokens.",
+        ),
+        "scenario": "In a 12–18 player game, the beneficiary of this "
+        "Non-Tradeable Calamity must belong to the primary victim's own "
+        "block.",
+        "beneficiary": (
+            "Of the eligible players, use the other player with the most "
+            "cities in stock. Break ties by tokens in stock, then "
+            "A.S.T.-Ranking. The primary victim cannot be the beneficiary.",
+        ),
+    },
+    "Civil Disorder": {
+        "stack": 7,
+        "tradeable": True,
+        "core": "Reduce all but 3 of your cities.",
+        "advances": (
+            ("music", "Music: reduce 1 fewer city."),
+            (
+                "drama_and_poetry",
+                "Drama and Poetry: reduce 1 fewer city.",
+            ),
+            ("law", "Law: reduce 1 fewer city."),
+            ("democracy", "Democracy: reduce 1 fewer city."),
+            (
+                "advanced_military",
+                "Advanced Military: reduce 1 additional city.",
+            ),
+            (
+                "naval_warfare",
+                "Naval Warfare: reduce 1 additional city.",
+            ),
+        ),
+        "details": (),
+        "scenario": "",
+    },
+    "Corruption": {
+        "stack": 8,
+        "tradeable": False,
+        "core": "Discard commodity cards with a total face value of at least "
+        "10 points. Use face value, not set value.",
+        "advances": (
+            ("law", "Law: discard 5 fewer face-value points."),
+            ("coinage", "Coinage: discard 5 additional face-value points."),
+            (
+                "wonder_of_the_world",
+                "Wonder of the World: discard 5 additional face-value points.",
+            ),
+        ),
+        "details": (
+            "The discarded cards must reach at least the adjusted required "
+            "face value; set-value bonuses do not count.",
+        ),
+        "scenario": "",
+    },
+    "Iconoclasm and Heresy": {
+        "stack": 8,
+        "tradeable": True,
+        "core": "Reduce 4 of your cities and select 2 other players who each "
+        "reduce 1 city. The beneficiary may not be selected as a secondary "
+        "victim.",
+        "advances": (
+            ("philosophy", "Philosophy: reduce 2 fewer cities."),
+            ("theology", "Theology: reduce 3 fewer cities."),
+            ("monotheism", "Monotheism: reduce 1 additional city."),
+            (
+                "theocracy",
+                "Theocracy: you may discard 2 commodity cards to prevent "
+                "your city-reduction effect.",
+            ),
+        ),
+        "details": (
+            "Cancel the calamity if the primary victim has no cities before "
+            "prevention effects.",
+            "Prevention by Philosophy, Theology or Theocracy does not cancel "
+            "the reductions suffered by secondary victims.",
+            "A player cannot be selected as a secondary victim if they are "
+            "already a primary victim, secondary victim or beneficiary of "
+            "another Iconoclasm and Heresy this turn.",
+        ),
+        "scenario": "In a 12–18 player game, the beneficiary and secondary "
+        "victims of this Tradeable Calamity may be selected from either "
+        "block.",
+        "beneficiary": (
+            "Use the last player who traded this calamity. If it was not "
+            "traded or cannot be traced, use the eligible player with most "
+            "cities in stock; break ties by tokens in stock, then "
+            "A.S.T.-Ranking.",
+        ),
+    },
+    "Regression": {
+        "stack": 9,
+        "tradeable": False,
+        "core": "Move your succession marker 1 step backward on the A.S.T.",
+        "advances": (
+            (
+                "fundamentalism",
+                "Fundamentalism: move backward 1 additional step.",
+            ),
+            ("library", "Library: move backward 1 fewer step."),
+            (
+                "enlightenment",
+                "Enlightenment: for each backward step, you may destroy 2 of "
+                "your cities to prevent it; use non-coastal cities if "
+                "possible.",
+            ),
+        ),
+        "details": (
+            "Regression does not prevent you from advancing normally during "
+            "this turn's A.S.T.-Alteration phase.",
+        ),
+        "scenario": "",
+    },
+    "Piracy": {
+        "stack": 9,
+        "tradeable": True,
+        "core": "The beneficiary replaces 2 of your coastal cities with "
+        "pirate cities. Then select 2 other players and replace 1 coastal "
+        "city belonging to each with a pirate city.",
+        "advances": (
+            (
+                "cartography",
+                "Primary victim with Cartography: replace 1 additional "
+                "coastal city.",
+            ),
+            (
+                "naval_warfare",
+                "Primary victim with Naval Warfare: replace 1 fewer coastal "
+                "city. A Naval Warfare holder cannot be a secondary victim.",
+            ),
+            (
+                "universal_doctrine",
+                "Universal Doctrine may later annex pirate cities remaining "
+                "on the board.",
+            ),
+        ),
+        "details": (
+            "The beneficiary may not be selected as a secondary victim.",
+            "Cancel Piracy if the primary victim has no coastal cities before "
+            "prevention effects.",
+            "Pirate cities remain until destroyed or annexed with Universal "
+            "Doctrine.",
+            "A player cannot be selected as a secondary victim if they are "
+            "already a primary victim, secondary victim or beneficiary of "
+            "another Piracy this turn.",
+        ),
+        "scenario": "In a 12–18 player game, the beneficiary and secondary "
+        "victims of this Tradeable Calamity may be selected from either "
+        "block.",
+        "beneficiary": (
+            "Use the last player who traded this calamity. If it was not "
+            "traded or cannot be traced, use the eligible player with most "
+            "cities in stock; break ties by tokens in stock, then "
+            "A.S.T.-Ranking.",
+        ),
+    },
+}
+
+
+class MajorCalamityDialog(tk.Toplevel):
+    """Yhteinen popup Stackien 2–5 Major Calamity -ohjeille."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        game: GameState,
+        calamity_name: str,
+    ) -> None:
+        super().__init__(parent)
+        spec = CALAMITY_DIALOG_SPECS[calamity_name]
+        self.title(f"Major Calamity – {calamity_name}")
+        self.configure(background=BACKGROUND)
+        self.geometry("1080x900")
+        self.minsize(980, 820)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+
+        outer = tk.Frame(self, background=BACKGROUND, padx=30, pady=24)
+        outer.pack(fill="both", expand=True)
+        heading = tk.Frame(outer, background=BACKGROUND)
+        heading.pack(fill="x")
+        tk.Label(
+            heading,
+            text=calamity_name.upper(),
+            anchor="w",
+            font=("Segoe UI Semibold", 24),
+            background=BACKGROUND,
+            foreground=TEXT,
+        ).pack(side="left")
+        tradeable = bool(spec["tradeable"])
+        tk.Label(
+            heading,
+            text=(
+                f"STACK {spec['stack']}  •  "
+                f"{'TRADEABLE' if tradeable else 'NON-TRADEABLE'}"
+            ),
+            font=("Segoe UI Semibold", 10),
+            background="#315b79" if tradeable else "#713747",
+            foreground="#ffffff",
+            padx=12,
+            pady=6,
+        ).pack(side="right")
+
+        core = tk.Frame(outer, background=ACCENT, padx=16, pady=12)
+        core.pack(fill="x", pady=(16, 12))
+        tk.Label(
+            core,
+            text="CORE EFFECT",
+            anchor="w",
+            font=("Segoe UI Semibold", 12),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x")
+        tk.Label(
+            core,
+            text=str(spec["core"]),
+            anchor="w",
+            justify="left",
+            wraplength=970,
+            font=("Segoe UI Semibold", 12),
+            background=ACCENT,
+            foreground="#101010",
+        ).pack(fill="x", pady=(5, 0))
+
+        columns = tk.Frame(outer, background=BACKGROUND)
+        columns.pack(fill="both", expand=True)
+        left = tk.Frame(columns, background=BACKGROUND)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right = tk.Frame(columns, background=BACKGROUND)
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        advances = tuple(spec["advances"])
+        self._add_section(
+            left,
+            "AFFECTING ADVANCES",
+            tuple(effect for _advance_id, effect in advances),
+            "#2d4936",
+        )
+        _add_current_advance_holders(
+            left,
+            game,
+            tuple(advance_id for advance_id, _effect in advances),
+            table_height=5,
+        )
+        details = tuple(spec["details"])
+        if details:
+            self._add_section(
+                right,
+                "RESOLUTION DETAILS",
+                details,
+                PANEL_ALT,
+            )
+        scenario = str(spec["scenario"])
+        if scenario and game.player_count >= 12:
+            self._add_section(
+                right,
+                "12–18 PLAYER SCENARIO",
+                (scenario,),
+                "#563d67",
+            )
+        beneficiary = tuple(spec.get("beneficiary", ()))
+        if beneficiary:
+            self._add_section(
+                right,
+                "BENEFICIARY",
+                beneficiary,
+                "#315b79",
+            )
+
+        ttk.Button(
+            outer,
+            text="Close",
+            style="Accent.TButton",
+            command=self.destroy,
+        ).pack(side="bottom", anchor="e", pady=(12, 0))
+        self.bind("<Escape>", lambda _event: self.destroy())
+
+    @staticmethod
+    def _add_section(
+        parent: tk.Widget,
+        title: str,
+        rules: tuple[str, ...],
+        title_color: str,
+    ) -> None:
+        section = tk.Frame(parent, background=PANEL_ALT)
+        section.pack(fill="x", pady=5)
+        tk.Label(
+            section,
+            text=title,
+            anchor="w",
+            font=("Segoe UI Semibold", 11),
+            background=title_color,
+            foreground="#ffffff",
+            padx=12,
+            pady=7,
+        ).pack(fill="x")
+        for rule in rules:
+            tk.Label(
+                section,
+                text=f"•  {rule}",
+                anchor="nw",
+                justify="left",
+                wraplength=455,
+                font=("Segoe UI", 10),
+                background=PANEL_ALT,
+                foreground=TEXT,
+                padx=12,
+                pady=3,
+            ).pack(fill="x")
 
 
 class MegaEmpiresApp:
@@ -1507,35 +2790,28 @@ class MegaEmpiresApp:
         for child in self.sequence_tab.winfo_children():
             child.destroy()
 
-        header = ttk.Frame(self.sequence_tab, padding=(18, 12))
-        header.pack(fill="x")
         current = PHASE_BY_NUMBER[self.game.current_phase]
-        ttk.Label(
-            header,
+        content = ttk.Frame(self.sequence_tab, padding=(18, 12, 18, 18))
+        content.pack(fill="both", expand=True)
+
+        phase_column = tk.Frame(content, background=BACKGROUND, width=368)
+        phase_column.pack(side="left", fill="y", padx=(0, 16))
+        phase_column.pack_propagate(False)
+        tk.Label(
+            phase_column,
             text=(
                 f"TURN {self.game.round_number}  •  "
                 f"PHASE {current.number} OF {len(PHASES)}"
             ),
-            style="Title.TLabel",
-        ).pack(side="left")
+            anchor="w",
+            font=("Segoe UI Semibold", 23),
+            background=BACKGROUND,
+            foreground=TEXT,
+            pady=18,
+        ).pack(fill="x")
 
-        ttk.Button(
-            header,
-            text="Next Phase  >",
-            style="Accent.TButton",
-            command=lambda: self._change_phase(1),
-        ).pack(side="right")
-        ttk.Button(
-            header,
-            text="<  Previous Phase",
-            command=lambda: self._change_phase(-1),
-        ).pack(side="right", padx=(0, 10))
-
-        content = ttk.Frame(self.sequence_tab, padding=(18, 0, 18, 18))
-        content.pack(fill="both", expand=True)
-
-        phase_list = tk.Frame(content, background=BACKGROUND, width=368)
-        phase_list.pack(side="left", fill="y", padx=(0, 16))
+        phase_list = tk.Frame(phase_column, background=BACKGROUND)
+        phase_list.pack(fill="both", expand=True)
         phase_list.pack_propagate(False)
         for phase in PHASES:
             selected = phase.number == self.game.current_phase
@@ -1565,6 +2841,19 @@ class MegaEmpiresApp:
         summary = tk.Frame(content, background=PANEL, width=400)
         summary.pack(side="right", fill="y", padx=(16, 0))
         summary.pack_propagate(False)
+        navigation = tk.Frame(summary, background=BACKGROUND)
+        navigation.pack(fill="x", pady=(0, 8))
+        ttk.Button(
+            navigation,
+            text="< Previous",
+            command=lambda: self._change_phase(-1),
+        ).pack(side="left")
+        ttk.Button(
+            navigation,
+            text="Next >",
+            style="Accent.TButton",
+            command=lambda: self._change_phase(1),
+        ).pack(side="right")
         self._render_default_rules(summary, current.number)
 
         detail = tk.Frame(content, background=PANEL, padx=24, pady=18)
@@ -1619,7 +2908,14 @@ class MegaEmpiresApp:
                 pady=6,
             ).pack(fill="x")
 
-        special_rules = self._small_east_phase_rules(phase)
+        if current_phase == 8 and not (
+            self.game is not None
+            and self.game.player_count in {3, 4}
+            and self.game.game_mode in {"WEST", "EAST"}
+        ):
+            self._render_minor_calamities(parent)
+
+        special_rules = self._small_player_phase_rules(phase)
         if special_rules:
             tk.Frame(parent, background="#344258", height=1).pack(
                 fill="x",
@@ -1628,7 +2924,7 @@ class MegaEmpiresApp:
             )
             tk.Label(
                 parent,
-                text="3–4 PLAYER EAST",
+                text=f"3–4 PLAYER {self.game.game_mode}",
                 anchor="w",
                 font=("Segoe UI Semibold", 11),
                 background=PANEL,
@@ -1638,7 +2934,7 @@ class MegaEmpiresApp:
             for rule in special_rules:
                 tk.Label(
                     parent,
-                    text=f"•  {rule.removeprefix('3–4 PLAYER EAST: ')}",
+                    text=f"•  {rule}",
                     anchor="nw",
                     justify="left",
                     wraplength=350,
@@ -1648,6 +2944,110 @@ class MegaEmpiresApp:
                     padx=18,
                     pady=5,
                 ).pack(fill="x")
+
+        affecting_advances = PHASE_AFFECTING_ADVANCES.get(current_phase, ())
+        if affecting_advances:
+            tk.Frame(parent, background="#344258", height=1).pack(
+                fill="x",
+                padx=18,
+                pady=(18, 12),
+            )
+            tk.Label(
+                parent,
+                text="AFFECTING ADVANCES",
+                anchor="w",
+                justify="left",
+                wraplength=350,
+                font=("Segoe UI Semibold", 12),
+                background=PANEL,
+                foreground=ACCENT,
+                padx=18,
+            ).pack(fill="x", pady=(0, 6))
+            for advance_id, abbreviation in affecting_advances:
+                advance = ADVANCE_BY_ID[advance_id]
+                group = advance.groups[0]
+                card_color = ADVANCE_GROUP_COLORS[group]
+                tk.Label(
+                    parent,
+                    text=f"{abbreviation}  •  {advance.name}",
+                    anchor="w",
+                    font=("Segoe UI Semibold", 12),
+                    background=card_color,
+                    foreground=(
+                        "#101010" if group == "RELIGION" else "#ffffff"
+                    ),
+                    padx=12,
+                    pady=7,
+                ).pack(fill="x", padx=18, pady=3)
+
+        upon_purchase = PHASE_UPON_PURCHASE_ADVANCES.get(current_phase, ())
+        if upon_purchase:
+            tk.Frame(parent, background="#344258", height=1).pack(
+                fill="x",
+                padx=18,
+                pady=(18, 12),
+            )
+            tk.Label(
+                parent,
+                text="UPON PURCHASE",
+                anchor="w",
+                font=("Segoe UI Semibold", 12),
+                background=PANEL,
+                foreground=ACCENT,
+                padx=18,
+            ).pack(fill="x", pady=(0, 6))
+            for advance_id, abbreviation in upon_purchase:
+                advance = ADVANCE_BY_ID[advance_id]
+                group = advance.groups[0]
+                tk.Label(
+                    parent,
+                    text=f"{abbreviation}  •  {advance.name}",
+                    anchor="w",
+                    font=("Segoe UI Semibold", 12),
+                    background=ADVANCE_GROUP_COLORS[group],
+                    foreground=(
+                        "#101010" if group == "RELIGION" else "#ffffff"
+                    ),
+                    padx=12,
+                    pady=7,
+                ).pack(fill="x", padx=18, pady=3)
+
+    def _render_minor_calamities(self, parent: tk.Frame) -> None:
+        tk.Frame(parent, background="#344258", height=1).pack(
+            fill="x",
+            padx=18,
+            pady=(12, 8),
+        )
+        tk.Label(
+            parent,
+            text="MINOR CALAMITIES",
+            anchor="w",
+            font=("Segoe UI Semibold", 12),
+            background=PANEL,
+            foreground=ACCENT,
+            padx=18,
+        ).pack(fill="x", pady=(0, 5))
+        for calamity in MINOR_CALAMITIES:
+            card = tk.Frame(parent, background=PANEL_ALT, padx=6, pady=2)
+            card.pack(fill="x", padx=18, pady=1)
+            tk.Label(
+                card,
+                text=f"STACK {calamity.stack}  •  {calamity.name}",
+                anchor="w",
+                font=("Segoe UI Semibold", 9),
+                background=PANEL_ALT,
+                foreground=TEXT,
+            ).pack(fill="x")
+            tk.Label(
+                card,
+                text=calamity.effect,
+                anchor="nw",
+                justify="left",
+                wraplength=340,
+                font=("Segoe UI", 8),
+                background=PANEL_ALT,
+                foreground=MUTED,
+            ).pack(fill="x")
 
     def _select_phase(self, phase_number: int) -> None:
         if self.game is None:
@@ -1668,6 +3068,117 @@ class MegaEmpiresApp:
         self._refresh_header()
         self._refresh_sequence()
 
+    def _render_major_calamities(self, parent: tk.Frame) -> None:
+        tk.Label(
+            parent,
+            text="MAJOR CALAMITIES — RESOLUTION ORDER",
+            anchor="w",
+            font=("Segoe UI Semibold", 15),
+            background=PANEL,
+            foreground=TEXT,
+        ).pack(fill="x", pady=(4, 7))
+
+        legend = tk.Frame(parent, background=PANEL)
+        legend.pack(fill="x", pady=(0, 7))
+        for text, color in (
+            ("NON-TRADEABLE", "#713747"),
+            ("TRADEABLE", "#315b79"),
+        ):
+            tk.Label(
+                legend,
+                text=text,
+                font=("Segoe UI Semibold", 9),
+                background=color,
+                foreground="#ffffff",
+                padx=10,
+                pady=3,
+            ).pack(side="left", padx=(0, 8))
+
+        calamity_panel = tk.Frame(parent, background=PANEL)
+        calamity_panel.pack(fill="x")
+        detail_dialogs = {
+            "Volcanic Eruption": lambda: VolcanicEruptionDialog(
+                self.root,
+                self.game,
+            ),
+            "Civil War": lambda: CivilWarDialog(self.root, self.game),
+        }
+        detail_dialogs.update(
+            {
+                calamity_name: (
+                    lambda selected=calamity_name: MajorCalamityDialog(
+                        self.root,
+                        self.game,
+                        selected,
+                    )
+                )
+                for calamity_name in CALAMITY_DIALOG_SPECS
+            }
+        )
+        for position, calamity in enumerate(MAJOR_CALAMITIES, start=1):
+            color = "#315b79" if calamity.tradeable else "#713747"
+            dialog_class = detail_dialogs.get(calamity.name)
+            row = tk.Frame(calamity_panel, background=color, height=34)
+            row.pack(fill="x", pady=1)
+            row.pack_propagate(False)
+            tk.Label(
+                row,
+                text=str(position),
+                width=3,
+                font=("Segoe UI Semibold", 11),
+                background="#101722",
+                foreground=TEXT,
+            ).pack(side="left", fill="y")
+            tk.Label(
+                row,
+                text=f"STACK {calamity.stack}",
+                width=9,
+                anchor="w",
+                font=("Segoe UI Semibold", 10),
+                background=color,
+                foreground="#ffffff",
+                padx=10,
+            ).pack(side="left", fill="y")
+            tk.Label(
+                row,
+                text=calamity.name,
+                anchor="w",
+                font=("Segoe UI Semibold", 13),
+                background=color,
+                foreground="#ffffff",
+                padx=8,
+            ).pack(side="left", fill="both", expand=True)
+            type_label = tk.Label(
+                row,
+                text=(
+                    (
+                        "TRADEABLE"
+                        if calamity.tradeable
+                        else "NON-TRADEABLE"
+                    )
+                    + "  •  DETAILS"
+                    if dialog_class is not None
+                    else (
+                        "TRADEABLE"
+                        if calamity.tradeable
+                        else "NON-TRADEABLE"
+                    )
+                ),
+                anchor="e",
+                font=("Segoe UI Semibold", 9),
+                background=color,
+                foreground="#ffffff",
+                padx=12,
+            )
+            type_label.pack(side="right", fill="y")
+            if dialog_class is not None:
+                for widget in (row, *row.winfo_children()):
+                    widget.configure(cursor="hand2")
+                    widget.bind(
+                        "<Button-1>",
+                        lambda _event, selected=dialog_class: selected(),
+                    )
+
     def _render_phase_detail(self, parent: tk.Frame, phase: Phase) -> None:
         if self.game is None:
             return
@@ -1675,7 +3186,7 @@ class MegaEmpiresApp:
             parent,
             text=f"{phase.number}. {phase.name}",
             anchor="w",
-            font=("Segoe UI Semibold", 25),
+            font=("Segoe UI Semibold", 23),
             background=PANEL,
             foreground=TEXT,
         ).pack(fill="x")
@@ -1689,6 +3200,10 @@ class MegaEmpiresApp:
             padx=12,
             pady=7,
         ).pack(fill="x", pady=(10, 12))
+
+        if phase.number == 8:
+            self._render_major_calamities(parent)
+            return
 
         if phase.player_order is None:
             tk.Label(
@@ -1734,12 +3249,46 @@ class MegaEmpiresApp:
 
         order_panel = tk.Frame(parent, background=PANEL)
         order_panel.pack(fill="x")
+        has_affecting_advances = bool(
+            PHASE_AFFECTING_ADVANCES.get(phase.number)
+        )
+        if has_affecting_advances:
+            column_header = tk.Frame(parent, background=PANEL)
+            column_header.pack(fill="x", pady=(0, 4), before=order_panel)
+            tk.Label(
+                column_header,
+                text="CIVILIZATION",
+                width=31,
+                anchor="w",
+                font=("Segoe UI Semibold", 9),
+                background=PANEL,
+                foreground=MUTED,
+                padx=58,
+            ).pack(side="left")
+            tk.Label(
+                column_header,
+                text="AFFECTING ADVANCES",
+                width=34,
+                anchor="w",
+                font=("Segoe UI Semibold", 9),
+                background=PANEL,
+                foreground=MUTED,
+            ).pack(side="left")
+            tk.Label(
+                column_header,
+                text="ORDER BASIS",
+                anchor="e",
+                font=("Segoe UI Semibold", 9),
+                background=PANEL,
+                foreground=MUTED,
+                padx=10,
+            ).pack(side="right", fill="x", expand=True)
         for index, player in enumerate(ordered, start=1):
             civilization = CIVILIZATION_BY_NAME[player.civilization]
             row = tk.Frame(
                 order_panel,
                 background=PANEL_ALT if index % 2 else "#1d2a3b",
-                height=27,
+                height=34,
             )
             row.pack(fill="x", pady=1)
             row.pack_propagate(False)
@@ -1747,28 +3296,32 @@ class MegaEmpiresApp:
                 row,
                 text=str(index),
                 width=3,
-                font=("Segoe UI Semibold", 10),
+                font=("Segoe UI Semibold", 12),
                 background=civilization.color,
                 foreground=civilization.text_color,
             ).pack(side="left", fill="y")
             tk.Label(
                 row,
                 text=player.display_name,
+                width=26,
                 anchor="w",
-                font=("Segoe UI Semibold", 10),
+                font=("Segoe UI Semibold", 12),
                 background=row.cget("background"),
                 foreground=TEXT,
                 padx=10,
-            ).pack(side="left", fill="both", expand=True)
-            tk.Label(
+            ).pack(side="left", fill="y")
+            if has_affecting_advances:
+                self._render_player_advance_badges(row, phase, player)
+            order_detail = tk.Label(
                 row,
                 text=self._phase_order_detail(phase, player),
                 anchor="e",
-                font=("Segoe UI", 9),
+                font=("Segoe UI", 10),
                 background=row.cget("background"),
                 foreground=MUTED,
                 padx=10,
-            ).pack(side="right", fill="y")
+            )
+            order_detail.pack(side="right", fill="both", expand=True)
 
         if phase.player_order == "city_count":
             excluded = sum(player.cities == 0 for player in self.game.players)
@@ -1789,25 +3342,25 @@ class MegaEmpiresApp:
     def _phase_order_summary(self, phase: Phase) -> str:
         if (
             self.game is not None
-            and self.game.game_mode == "EAST"
+            and self.game.game_mode in {"WEST", "EAST"}
             and self.game.player_count in {3, 4}
             and phase.number == 7
         ):
             return "Priority order; up to 6 market rounds"
         return phase.order_summary
 
-    def _small_east_phase_rules(self, phase: Phase) -> tuple[str, ...]:
-        """Lisää 3–4 pelaajan East-skenaarion olennaiset pöytämuistutukset."""
+    def _small_player_phase_rules(self, phase: Phase) -> tuple[str, ...]:
+        """Lisää 3–4 pelaajan West/East-skenaarion pöytämuistutukset."""
 
         if (
             self.game is None
-            or self.game.game_mode != "EAST"
+            or self.game.game_mode not in {"WEST", "EAST"}
             or self.game.player_count not in {3, 4}
         ):
             return ()
         if phase.number == 6:
             return (
-                "3–4 PLAYER EAST: Set up the Market board after regular "
+                "Set up the Market board after regular "
                 "dealing: add 1 Water card and one face-down card from each "
                 "stack through the highest city count.",
                 "Players may buy any number of Water cards for 2 treasury "
@@ -1815,7 +3368,7 @@ class MegaEmpiresApp:
             )
         if phase.number == 7:
             return (
-                "3–4 PLAYER EAST: In priority order, trade with the Market "
+                "In priority order, trade with the Market "
                 "board or pass. Repeat until everyone passes consecutively "
                 "or 6 market rounds have been completed.",
                 "A trade always places exactly 2 cards and takes exactly 2 "
@@ -1823,17 +3376,18 @@ class MegaEmpiresApp:
             )
         if phase.number == 8:
             return (
-                "3–4 PLAYER EAST: Reveal all face-down Market board cards "
+                "Reveal all face-down Market board cards "
                 "after trading ends.",
+                "Minor Calamities are not used in the 3–4 player scenario.",
             )
         if phase.number == 9:
             return (
-                "3–4 PLAYER EAST: Use the dedicated 3–4 player Calamity "
+                "Use the dedicated 3–4 player Calamity "
                 "Quick Chart and resolve calamities remaining on the Market.",
             )
         if phase.number == 13:
             return (
-                "3–4 PLAYER EAST: Discard all remaining Market cards, "
+                "Discard all remaining Market cards, "
                 "shuffle the discards, and place them under their stacks.",
             )
         return ()
@@ -1849,7 +3403,10 @@ class MegaEmpiresApp:
             return f"{player.cities} {'city' if player.cities == 1 else 'cities'}"
         if phase.player_order in {"ast_progress", "special_progress"}:
             detail = f"A.S.T. step {player.ast_step}  •  {player.ast_step * 5} VP"
-            if phase.player_order == "special_progress":
+            if (
+                phase.player_order == "special_progress"
+                and phase.number not in PHASE_AFFECTING_ADVANCES
+            ):
                 abilities = sorted(
                     ADVANCE_BY_ID[advance_id].name
                     for advance_id in player.advances
@@ -1858,6 +3415,49 @@ class MegaEmpiresApp:
                 detail += "  •  " + ", ".join(abilities)
             return detail
         return f"A.S.T. rank #{civilization.ast_rank}"
+
+    def _render_player_advance_badges(
+        self,
+        row: tk.Frame,
+        phase: Phase,
+        player: PlayerState,
+    ) -> None:
+        badge_column = tk.Frame(
+            row,
+            background=row.cget("background"),
+            width=300,
+        )
+        badge_column.pack(side="left", fill="y")
+        badge_column.pack_propagate(False)
+        owned = self._owned_affecting_advances(phase, player)
+        for advance_id, abbreviation in owned:
+            advance = ADVANCE_BY_ID[advance_id]
+            group = advance.groups[0]
+            tk.Label(
+                badge_column,
+                text=abbreviation,
+                font=("Segoe UI Semibold", 8),
+                background=ADVANCE_GROUP_COLORS[group],
+                foreground=(
+                    "#101010" if group == "RELIGION" else "#ffffff"
+                ),
+                padx=5,
+                pady=2,
+            ).pack(side="left", padx=(0, 2), pady=5)
+
+    def _owned_affecting_advances(
+        self,
+        phase: Phase,
+        player: PlayerState,
+    ) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (advance_id, abbreviation)
+            for advance_id, abbreviation in PHASE_AFFECTING_ADVANCES.get(
+                phase.number,
+                (),
+            )
+            if advance_id in player.advances
+        )
 
     def _refresh_ast(self) -> None:
         if self.game is None:

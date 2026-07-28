@@ -5,7 +5,8 @@
 Toteutetaan paikalliseen käyttöön Python-ohjelma Mega Empires -lautapelin
 suuren yhdistelmäpelin seurantaan. Käytössä ovat Mega Empires: The West ja
 Mega Empires: The East. Ohjelma tukee pelaajamääriä 3–18. Pelaajamäärillä
-3–4 käytetään The Eastin erikoisskenaariota.
+3–4 pelaajalla käytetään käyttäjän valinnan mukaan The Westin tai The Eastin
+erikoisskenaariota.
 Tämän peliporukan tavallinen pelaajamäärä on 14–16.
 
 Tietokone liitetään suureen televisioon. Kaikkien pelaajien pitää pystyä
@@ -36,7 +37,8 @@ vastaavat. Skenaario-oppaan luku 5 kuvaa 10–18 pelaajan yhdistelmäpelin ja
 sen poikkeukset. Ohjelma tehdään ensisijaisesti Basic Game -säännöille.
 Pelaajamäärä valitaan pelin alussa, eikä näkymään luoda tyhjiä kilpailijoita.
 
-3–4 pelaajan pelissä käytetään The Eastin erikoisskenaariota. 5–9 pelaajan pelissä käyttäjä valitsee joko The West- tai The East
+3–4 pelaajan pelissä käyttäjä valitsee The West- tai The East
+-erikoisskenaarion. 5–9 pelaajan pelissä käyttäjä valitsee joko The West- tai The East
 -pelilaatikon. 10–18 pelaajan pelissä molemmat laatikot ovat pakollisia.
 Ohjelma valitsee ohjekirjojen kartta-asettelujen mukaiset sivilisaatiot
 automaattisesti pelaajamäärän ja pelilaatikon perusteella.
@@ -375,6 +377,9 @@ menettämisen eri symboleilla.
 
 - kauppakorttien käsien tai kauppojen seuranta;
 - calamityjen automaattinen ratkaiseminen;
+- erillinen Calamity Resolution -avustin omalla välilehdellään; tämä jätetään
+  myöhempään jatkokehitykseen, koska vaiheeseen vaikuttavia kortteja ja
+  calamitykohtaisia poikkeuksia on paljon;
 - kartan, väestömerkkien alueiden tai laivojen seuranta;
 - verkkomoninpeli tai usean laitteen synkronointi;
 - käyttäjätilit, käyttöoikeudet tai pilvitallennus;
