@@ -13,6 +13,8 @@ from mega_empires.models import PlayerState
 
 class CreditTests(unittest.TestCase):
     def test_starting_credits_follow_player_count(self) -> None:
+        self.assertEqual(starting_color_credit(3), 10)
+        self.assertEqual(starting_color_credit(4), 5)
         self.assertEqual(starting_color_credit(5), 10)
         self.assertEqual(starting_color_credit(6), 5)
         self.assertEqual(starting_color_credit(7), 0)

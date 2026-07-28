@@ -72,14 +72,23 @@ def meets_basic_ast_requirement(
     return qualifying_advances >= requirement.minimum_advances
 
 
-def ast_marker_state(player: PlayerState) -> str:
+def ast_marker_state(
+    player: PlayerState,
+    player_count: int | None = None,
+    game_mode: str | None = None,
+) -> str:
     """Palauta READY, BLOCKED, WARNING tai FINISHED markkeria varten.
 
     WARNING tarkoittaa, etteivät nykyisen aikakauden vaatimukset enää täyty.
     Basic-pelissä tämä ei itsessään siirrä markkeria taaksepäin.
     """
 
-    current_era = ast_era_index(player.civilization, player.ast_step)
+    current_era = ast_era_index(
+        player.civilization,
+        player.ast_step,
+        player_count=player_count,
+        game_mode=game_mode,
+    )
     if not meets_basic_ast_requirement(player, current_era):
         return "WARNING"
     if player.ast_step >= AST_MAX_STEP:

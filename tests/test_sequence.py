@@ -15,6 +15,13 @@ class SequenceTests(unittest.TestCase):
     def test_sequence_contains_all_thirteen_phases(self) -> None:
         self.assertEqual([phase.number for phase in PHASES], list(range(1, 14)))
 
+    def test_movement_reminds_ship_limits_and_costs(self) -> None:
+        movement_rules = " ".join(PHASES[2].rules)
+        self.assertIn("up to 4 water areas", movement_rules)
+        self.assertIn("carry up to 5 tokens", movement_rules)
+        self.assertIn("Build a new ship for 2 tokens", movement_rules)
+        self.assertIn("maintain it with 1 token", movement_rules)
+
     def test_movement_uses_census_and_puts_military_last(self) -> None:
         high = PlayerState("Saba", "High", "EAST", census=40)
         low = PlayerState("Minoa", "Low", "WEST", census=20)

@@ -9,6 +9,7 @@ from mega_empires.data import (
     ast_era_index,
     default_block,
     scenario_civilizations,
+    basic_ast_era_starts,
 )
 
 
@@ -107,6 +108,10 @@ class DataTests(unittest.TestCase):
         self.assertEqual(default_block("Minoa", 10), "SINGLE")
 
     def test_official_setups_cover_every_player_count(self) -> None:
+        for count in range(3, 5):
+            names = scenario_civilizations("EAST", count)
+            self.assertEqual(len(names), count)
+            self.assertEqual(len(set(names)), count)
         for count in range(5, 10):
             for mode in ("WEST", "EAST"):
                 names = scenario_civilizations(mode, count)
@@ -119,6 +124,14 @@ class DataTests(unittest.TestCase):
 
     def test_known_setup_memberships(self) -> None:
         self.assertEqual(
+            set(scenario_civilizations("EAST", 3)),
+            {"Indus", "Kushan", "Parthia"},
+        )
+        self.assertEqual(
+            set(scenario_civilizations("EAST", 4)),
+            {"Indus", "Kushan", "Parthia", "Persia"},
+        )
+        self.assertEqual(
             set(scenario_civilizations("WEST", 5)),
             {"Minoa", "Assyria", "Hatti", "Hellas", "Egypt"},
         )
@@ -128,6 +141,16 @@ class DataTests(unittest.TestCase):
         )
         self.assertNotIn("Celt", scenario_civilizations("BOTH", 17))
         self.assertEqual(len(scenario_civilizations("BOTH", 18)), 18)
+
+    def test_three_player_east_uses_parthia_ast_adjustment(self) -> None:
+        self.assertEqual(
+            basic_ast_era_starts("Parthia", 3, "EAST"),
+            (0, 5, 9, 11, 14, 15),
+        )
+        self.assertEqual(
+            basic_ast_era_starts("Parthia", 4, "EAST"),
+            BASIC_AST_ERA_STARTS["Parthia"],
+        )
 
     def test_invalid_mode_and_player_count_are_rejected(self) -> None:
         with self.assertRaises(ValueError):

@@ -4,7 +4,8 @@
 
 Toteutetaan paikalliseen käyttöön Python-ohjelma Mega Empires -lautapelin
 suuren yhdistelmäpelin seurantaan. Käytössä ovat Mega Empires: The West ja
-Mega Empires: The East. Ohjelma tukee mitä tahansa pelaajamäärää 5–18.
+Mega Empires: The East. Ohjelma tukee pelaajamääriä 3–18. Pelaajamäärillä
+3–4 käytetään The Eastin erikoisskenaariota.
 Tämän peliporukan tavallinen pelaajamäärä on 14–16.
 
 Tietokone liitetään suureen televisioon. Kaikkien pelaajien pitää pystyä
@@ -35,7 +36,7 @@ vastaavat. Skenaario-oppaan luku 5 kuvaa 10–18 pelaajan yhdistelmäpelin ja
 sen poikkeukset. Ohjelma tehdään ensisijaisesti Basic Game -säännöille.
 Pelaajamäärä valitaan pelin alussa, eikä näkymään luoda tyhjiä kilpailijoita.
 
-5–9 pelaajan pelissä käyttäjä valitsee joko The West- tai The East
+3–4 pelaajan pelissä käytetään The Eastin erikoisskenaariota. 5–9 pelaajan pelissä käyttäjä valitsee joko The West- tai The East
 -pelilaatikon. 10–18 pelaajan pelissä molemmat laatikot ovat pakollisia.
 Ohjelma valitsee ohjekirjojen kartta-asettelujen mukaiset sivilisaatiot
 automaattisesti pelaajamäärän ja pelilaatikon perusteella.
@@ -196,9 +197,9 @@ pelaajat pystyvät tarkistamaan kirjauksen. Vaarallisin tavallinen virhe on
 tiedon syöttäminen väärälle pelaajalle, joten pelaajan nimi, väri ja
 sivilisaatio pidetään muokkaustilassa erityisen näkyvinä.
 
-Tilanne tallennetaan automaattisesti paikalliseen tiedostoon jokaisen
-muutoksen jälkeen. Lisäksi tarjotaan vähintään uuden pelin aloitus sekä
-nykyisen pelin avaaminen. Yksi askel taaksepäin / viimeisimmän muutoksen
+Tilanne tallennetaan automaattisesti käyttäjän nimeämään paikalliseen
+tiedostoon jokaisen muutoksen jälkeen. Käynnistyksessä käyttäjä valitsee
+jatkettavan tallennuksen tai aloittaa uuden pelin. Yksi askel taaksepäin / viimeisimmän muutoksen
 kumoaminen on hyödyllinen, jos se voidaan toteuttaa pienellä vaivalla.
 
 ## 6. Sequence of Play ja pelaajajärjestykset

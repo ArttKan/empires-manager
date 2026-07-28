@@ -13,16 +13,28 @@ python app.py
 Ohjelma avautuu 1920 × 1080 -kokoisena. Ikkunaa voi käyttää myös
 pienemmässä koossa, mutta television kanssa suositus on Full HD.
 
-## Uusi peli
+## Pelin valinta ja uusi peli
 
-1. Valitse pelaajamäärä väliltä 5–18.
-2. Kun pelaajia on 5–9, valitse käytetäänkö The West- vai The East
+Kun ohjelma käynnistyy ja tallennuksia on olemassa, se näyttää tallennettujen
+pelien luettelon. Valitse peli ja paina **Continue**, tai aloita uusi peli
+painamalla **New Game**.
+
+1. Anna tallennettavalle pelille yksilöllinen nimi. Samannimistä aiempaa
+   tallennusta ei korvata vahingossa.
+2. Valitse pelaajamäärä väliltä 3–18.
+3. Kun pelaajia on 3–4, ohjelma käyttää automaattisesti The Eastin
+   erikoisskenaariota. Kun pelaajia on 5–9, valitse käytetäänkö The West- vai The East
    -pelilaatikkoa. Kun pelaajia on 10–18, ohjelma valitsee automaattisesti
    The West + The East -yhdistelmäpelin.
-3. Ohjelma valitsee pelaajamäärän mukaisen virallisen
+4. Ohjelma valitsee pelaajamäärän mukaisen virallisen
    sivilisaatiokokoonpanon.
-4. Kirjoita jokaisen sivilisaation pelaajan etunimi tai lempinimi.
-5. Viimeisen pelaajan jälkeen pistenäkymä avautuu automaattisesti.
+5. Kirjoita jokaisen sivilisaation pelaajan etunimi tai lempinimi.
+6. Viimeisen pelaajan jälkeen pistenäkymä avautuu automaattisesti.
+
+Kolmen pelaajan East-kokoonpano on Indus, Kushan ja Parthia. Neljän pelaajan
+kokoonpano lisää Persian. Ohjelma huomioi myös skenaarion alkukrediitit,
+Parthian kolmen pelaajan Basic A.S.T. -poikkeuksen sekä Market boardin
+olennaiset Sequence of Play -muistutukset.
 
 Pelaaja näkyy ohjelmassa muodossa `Sivilisaatio (nimi)`.
 
@@ -98,8 +110,9 @@ vaiheesta 13 siirrytään seuraavan kierroksen vaiheeseen 1.
 ## Sequence of Play -avustin
 
 Kolmas välilehti näyttää kaikki pelin 13 vaihetta. Nykyinen vaihe on korostettu,
-ja oikealla näkyvät sen tiivistetyt pääsäännöt sekä tarvittaessa automaattisesti
-laskettu pelaajajärjestys.
+ja keskellä näkyy vaiheen toimintajärjestys sekä tarvittaessa automaattisesti
+laskettu pelaajajärjestys. Oikean reunan **Default Rules / Values** -paneeli
+näyttää suurella tekstillä vain aktiivisen vaiheen tärkeimmät sääntöarvot.
 
 - Vaiheen voi valita suoraan vasemman reunan listasta.
 - **Previous Phase** ja **Next Phase** siirtävät aktiivista vaihetta.
@@ -110,7 +123,9 @@ laskettu pelaajajärjestys.
 Avustin käyttää seuraavia pelitietoja:
 
 - **Movement:** Census laskevasti; A.S.T.-Ranking ratkaisee tasatilanteet.
-  Militaryn omistajat liikkuvat kaikkien muiden jälkeen.
+  Militaryn omistajat liikkuvat kaikkien muiden jälkeen. Vaiheen ohjeissa
+  muistutetaan myös alusten liikerajasta, kapasiteetista, rakentamismaksusta,
+  ylläpitomaksusta ja pakollisesta maihinnoususta.
 - **Trade Cards Acquisition:** vähiten kaupunkeja ensin; pelaajat, joilla ei
   ole kaupunkeja, eivät saa kortteja.
 - **Special Abilities:** vain kyseisten Advance-korttien omistajat
@@ -124,15 +139,15 @@ A.S.T.-Ranking-vertailulistan.
 
 ## Tallennus
 
-Ohjelma tallentaa jokaisen muutoksen automaattisesti tiedostoon:
+Ohjelma tallentaa jokaisen muutoksen automaattisesti käyttäjän nimeämään
+JSON-tiedostoon:
 
 ```text
-tallennukset/nykyinen_peli.json
+tallennukset/<pelin nimi>.json
 ```
 
-Seuraavalla käynnistyskerralla ohjelma kysyy, jatketaanko tallennettua peliä.
-Uuden pelin aloittaminen korvaa tämän tallennuksen, kun ensimmäinen uusi peli
-on perustettu.
+Seuraavalla käynnistyskerralla peli voidaan valita kaikkien tallennusten
+luettelosta. Uuden pelin aloittaminen ei korvaa muita tallennettuja pelejä.
 
 ## Testien ajaminen
 

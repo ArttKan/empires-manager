@@ -50,6 +50,17 @@ PHASES = (
         "Movement",
         "Highest Census first; Military moves last",
         (
+            "Tokens move 1 area by land or embark a ship; a token may move "
+            "by land or ship during a turn, never both.",
+            "Ships move up to 4 water areas, carry up to 5 tokens, and may "
+            "not cross open sea areas by default. All carried tokens must "
+            "disembark after the ship's final step.",
+            "Build a new ship for 2 tokens, 2 treasury, or 1 token plus "
+            "1 treasury. If tokens are paid, at least 1 must come from the "
+            "ship's area.",
+            "Before using an existing ship, maintain it with 1 token from "
+            "anywhere on the board or 1 treasury. Return unmaintained old "
+            "ships to stock at the end of Movement.",
             "Non-Military players move in descending Census order. "
             "A.S.T.-Ranking breaks Census ties.",
             "All Military holders move after all non-holders. Their mutual "

@@ -255,13 +255,19 @@ def ast_era_index(
     civilization_name: str,
     ast_step: int,
     ast_variant: str = "BASIC",
+    player_count: int | None = None,
+    game_mode: str | None = None,
 ) -> int:
     """Palauta sivilisaation aikakauden indeksi annetulla AST-askeleella."""
 
     if ast_variant.upper() != "BASIC":
         raise ValueError("Expert A.S.T. era boundaries have not been added yet.")
     step = max(0, min(AST_MAX_STEP, int(ast_step)))
-    starts = BASIC_AST_ERA_STARTS[civilization_name]
+    starts = basic_ast_era_starts(
+        civilization_name,
+        player_count,
+        game_mode,
+    )
     era_index = 0
     for index, start in enumerate(starts):
         if step >= start:
@@ -299,6 +305,8 @@ _WEST_SETUPS = {
 }
 
 _EAST_SETUPS = {
+    3: ("Kushan", "Indus", "Parthia"),
+    4: ("Kushan", "Persia", "Indus", "Parthia"),
     5: ("Saba", "Babylon", "Persia", "Nubia", "Parthia"),
     6: ("Saba", "Babylon", "Kushan", "Persia", "Indus", "Parthia"),
     7: ("Saba", "Babylon", "Kushan", "Persia", "Nubia", "Indus", "Parthia"),
@@ -463,7 +471,7 @@ SCENARIO_SETUPS = {
 def scenario_civilizations(game_mode: str, player_count: int) -> tuple[str, ...]:
     game_mode = game_mode.upper()
     if game_mode not in SCENARIO_SETUPS:
-        raise ValueError(f"Tuntematon pelitila: {game_mode}")
+        raise ValueError(f"Unknown game mode: {game_mode}")
     try:
         names = SCENARIO_SETUPS[game_mode][player_count]
         return tuple(
@@ -474,10 +482,29 @@ def scenario_civilizations(game_mode: str, player_count: int) -> tuple[str, ...]
         )
     except KeyError as error:
         if game_mode == "BOTH":
-            message = "Yhdistelmäpeli tukee 10–18 pelaajaa."
+            message = "The combined game supports 10–18 players."
+        elif game_mode == "EAST":
+            message = "The East supports 3–9 players."
         else:
-            message = f"{GAME_MODE_LABELS[game_mode]} tukee 5–9 pelaajaa."
+            message = "The West supports 5–9 players."
         raise ValueError(message) from error
+
+
+def basic_ast_era_starts(
+    civilization_name: str,
+    player_count: int | None = None,
+    game_mode: str | None = None,
+) -> tuple[int, ...]:
+    """Palauta Basic A.S.T.:n rajat, myös 3 pelaajan East-poikkeuksella."""
+
+    starts = BASIC_AST_ERA_STARTS[civilization_name]
+    if (
+        civilization_name == "Parthia"
+        and player_count == 3
+        and game_mode == "EAST"
+    ):
+        return (starts[0], starts[1], 9, *starts[3:])
+    return starts
 
 
 def default_block(civilization_name: str, player_count: int) -> str:

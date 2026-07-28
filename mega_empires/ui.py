@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
+from pathlib import Path
 from typing import Callable
 
 from .ast_rules import BASIC_AST_REQUIREMENTS, ast_marker_state
@@ -15,10 +16,10 @@ from .data import (
     AST_ERA_ABBREVIATIONS,
     AST_ERA_NAMES,
     AST_MAX_STEP,
-    BASIC_AST_ERA_STARTS,
     CIVILIZATION_BY_NAME,
     GAME_MODE_LABELS,
     ast_era_index,
+    basic_ast_era_starts,
     default_block,
     scenario_civilizations,
 )
@@ -33,7 +34,13 @@ from .sequence import (
     adjacent_phase,
     phase_order,
 )
-from .storage import load_game, save_exists, save_game
+from .storage import (
+    SavedGame,
+    list_saved_games,
+    load_game,
+    save_game,
+    save_path_for_name,
+)
 
 
 BACKGROUND = "#101722"
@@ -71,6 +78,33 @@ ADVANCE_GROUP_LABELS = {
     "RELIGION": "Religions",
     "SCIENCE": "Sciences",
 }
+
+# Basic Rulebookin takasivun tiivistetyt oletusarvot.
+DEFAULT_RULES_VALUES = (
+    ("1  Tax", "2 tokens per city: stock → treasury"),
+    ("2  Expansion", "1 token → +1  •  2+ tokens → +2"),
+    ("3  Movement", "Token: 1 area  •  Ship: up to 4 water areas"),
+    ("", "A token moves by land or ship, never both"),
+    ("", "Ship capacity 5  •  No open sea by default"),
+    ("", "All carried tokens disembark after the ship's final step"),
+    ("", "New ship: 2 tokens / 2 treasury / 1 + 1"),
+    ("", "Maintain ship: 1 token or 1 treasury"),
+    ("4  Conflict", "Minority removes first  •  City attack: 7"),
+    ("", "Captured city → 6 tokens  •  Gain up to 3 treasury"),
+    ("5  Cities", "City site: 6 tokens  •  Wilderness: 12"),
+    ("", "City support: 2 tokens per city"),
+    ("6  Cards", "Stack #9 purchase: 15 treasury"),
+    ("7  Trade", "At least 3 cards  •  First 2 named are true"),
+    ("", "Calamities may not be named"),
+    ("8  Selection", "Max 3 calamities; max 2 Major"),
+    ("9  Resolution", "Token = 1 damage  •  City = 5 damage"),
+    ("10  Abilities", "Use all Special Abilities in any order"),
+    ("11  Support", "Remove surplus  •  Support: 2 per city"),
+    ("12  Advances", "Hand limit: 8 cards (5–11 players)"),
+    ("", "Hand limit: 9 cards (12–18 players)"),
+    ("13  A.S.T.", "Basic, 0 cities: freeze outside Stone Age"),
+    ("", "Expert, 0 cities: move back 1 outside Stone Age"),
+)
 
 
 def _configure_styles(root: tk.Tk) -> None:
@@ -118,7 +152,7 @@ class NewGameWizard(tk.Toplevel):
     def __init__(
         self,
         parent: tk.Tk,
-        on_complete: Callable[[GameState], None],
+        on_complete: Callable[[GameState, Path], None],
     ) -> None:
         super().__init__(parent)
         self.title("New Mega Empires Game")
@@ -133,6 +167,7 @@ class NewGameWizard(tk.Toplevel):
         self.player_count = tk.IntVar(value=16)
         self.game_mode = tk.StringVar(value="BOTH")
         self.nickname = tk.StringVar()
+        self.save_name = tk.StringVar()
         self.players: list[PlayerState] = []
         self.player_index = 0
         self.scenario_names: tuple[str, ...] = ()
@@ -154,9 +189,19 @@ class NewGameWizard(tk.Toplevel):
         ).pack(anchor="w", pady=(20, 8))
         ttk.Label(
             self.content,
-            text="Select the game boxes and number of players.",
+            text="Name the save and select the game boxes and player count.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(0, 24))
+
+        name_frame = ttk.Frame(self.content)
+        name_frame.pack(fill="x", pady=(0, 20))
+        ttk.Label(name_frame, text="Saved game name").pack(side="left")
+        ttk.Entry(
+            name_frame,
+            textvariable=self.save_name,
+            font=("Segoe UI", 13),
+            width=32,
+        ).pack(side="right", fill="x", expand=True, padx=(24, 0))
 
         mode_frame = ttk.LabelFrame(self.content, text="Game boxes", padding=14)
         mode_frame.pack(fill="x", pady=(0, 20))
@@ -176,7 +221,7 @@ class NewGameWizard(tk.Toplevel):
         count_box = ttk.Combobox(
             count_frame,
             textvariable=self.player_count,
-            values=tuple(range(5, 19)),
+            values=tuple(range(3, 19)),
             state="readonly",
             width=6,
             font=("Segoe UI", 13),
@@ -200,7 +245,15 @@ class NewGameWizard(tk.Toplevel):
 
     def _update_mode_rules(self, _event: object | None = None) -> None:
         count = self.player_count.get()
-        if count >= 10:
+        if count in {3, 4}:
+            self.game_mode.set("EAST")
+            self.mode_buttons["WEST"].state(["disabled"])
+            self.mode_buttons["EAST"].state(["!disabled"])
+            self.mode_buttons["BOTH"].state(["disabled"])
+            self.mode_note.configure(
+                text="The 3–4 player special scenario uses The East."
+            )
+        elif count >= 10:
             self.game_mode.set("BOTH")
             self.mode_buttons["WEST"].state(["disabled"])
             self.mode_buttons["EAST"].state(["disabled"])
@@ -220,6 +273,19 @@ class NewGameWizard(tk.Toplevel):
 
     def _start_players(self) -> None:
         self._update_mode_rules()
+        try:
+            save_path = save_path_for_name(self.save_name.get())
+        except ValueError as error:
+            messagebox.showerror("Invalid save name", str(error), parent=self)
+            return
+        if save_path.exists():
+            messagebox.showerror(
+                "Name already in use",
+                "A saved game with this name already exists. "
+                "Choose another name.",
+                parent=self,
+            )
+            return
         try:
             self.scenario_names = scenario_civilizations(
                 self.game_mode.get(),
@@ -338,7 +404,7 @@ class NewGameWizard(tk.Toplevel):
             )
             self.grab_release()
             self.destroy()
-            self.on_complete(game)
+            self.on_complete(game, save_path_for_name(self.save_name.get()))
         else:
             self._show_player()
 
@@ -880,10 +946,116 @@ class PlayerDialog(tk.Toplevel):
         self.destroy()
 
 
+class SavedGameDialog(tk.Toplevel):
+    """Tallennetun pelin valinta tai uuden pelin aloitus."""
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        saves: tuple[SavedGame, ...],
+        on_open: Callable[[Path], None],
+        on_new: Callable[[], None],
+    ) -> None:
+        super().__init__(parent)
+        self.title("Mega Empires – Saved Games")
+        self.configure(background=BACKGROUND)
+        self.geometry("760x520")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", parent.destroy)
+        self.saves = saves
+        self.on_open = on_open
+        self.on_new = on_new
+
+        content = ttk.Frame(self, padding=38)
+        content.pack(fill="both", expand=True)
+        ttk.Label(
+            content,
+            text="Choose a Saved Game",
+            style="Title.TLabel",
+        ).pack(anchor="w", pady=(10, 8))
+        ttk.Label(
+            content,
+            text="Continue an existing game or start a new one.",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w", pady=(0, 22))
+
+        self.tree = ttk.Treeview(
+            content,
+            columns=("players", "mode", "saved"),
+            show="tree headings",
+            height=12,
+            selectmode="browse",
+        )
+        self.tree.heading("#0", text="Saved game")
+        self.tree.heading("players", text="Players")
+        self.tree.heading("mode", text="Game")
+        self.tree.heading("saved", text="Last saved")
+        self.tree.column("#0", width=220)
+        self.tree.column("players", width=75, anchor="center")
+        self.tree.column("mode", width=145)
+        self.tree.column("saved", width=190)
+        self.tree.pack(fill="both", expand=True)
+        for index, save in enumerate(saves):
+            saved_at = save.saved_at.replace("T", " ")[:16]
+            self.tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                text=save.name,
+                values=(
+                    save.player_count,
+                    GAME_MODE_LABELS.get(save.game_mode, save.game_mode),
+                    saved_at,
+                ),
+            )
+        if saves:
+            self.tree.selection_set("0")
+            self.tree.focus("0")
+        self.tree.bind("<Double-1>", lambda _event: self._open_selected())
+
+        buttons = ttk.Frame(content)
+        buttons.pack(fill="x", pady=(20, 0))
+        ttk.Button(
+            buttons,
+            text="New Game",
+            command=self._new_game,
+        ).pack(side="left")
+        ttk.Button(
+            buttons,
+            text="Continue",
+            style="Accent.TButton",
+            command=self._open_selected,
+        ).pack(side="right")
+
+    def _close(self) -> None:
+        self.grab_release()
+        self.destroy()
+
+    def _new_game(self) -> None:
+        self._close()
+        self.on_new()
+
+    def _open_selected(self) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showerror(
+                "No saved game selected",
+                "Select a saved game to continue.",
+                parent=self,
+            )
+            return
+        path = self.saves[int(selection[0])].path
+        self._close()
+        self.on_open(path)
+
+
 class MegaEmpiresApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.game: GameState | None = None
+        self.save_path: Path | None = None
         root.title("Mega Empires – Score Tracker")
         root.configure(background=BACKGROUND)
         root.minsize(1280, 720)
@@ -892,41 +1064,42 @@ class MegaEmpiresApp:
         self._startup()
 
     def _startup(self) -> None:
-        if save_exists():
-            choice = messagebox.askyesnocancel(
-                "Saved game found",
-                "Continue the most recently saved game?\n\n"
-                "Yes = continue game\nNo = start a new game",
+        saves = list_saved_games()
+        if not saves:
+            self._new_game()
+            return
+        SavedGameDialog(
+            self.root,
+            saves,
+            self._load_selected_game,
+            self._new_game,
+        )
+
+    def _load_selected_game(self, path: Path) -> None:
+        try:
+            self._open_game(load_game(path), path)
+        except (OSError, ValueError, KeyError) as error:
+            messagebox.showerror(
+                "Could not open saved game",
+                f"The saved game could not be opened:\n{error}",
                 parent=self.root,
             )
-            if choice is None:
-                self.root.destroy()
-                return
-            if choice:
-                try:
-                    self._open_game(load_game())
-                    return
-                except (OSError, ValueError, KeyError) as error:
-                    messagebox.showerror(
-                        "Could not open saved game",
-                        f"The saved game could not be opened:\n{error}",
-                        parent=self.root,
-                    )
-        self._new_game()
+            self._startup()
 
     def _new_game(self) -> None:
         for child in self.root.winfo_children():
             child.destroy()
         NewGameWizard(self.root, self._open_game)
 
-    def _open_game(self, game: GameState) -> None:
+    def _open_game(self, game: GameState, path: Path) -> None:
         self.game = game
+        self.save_path = path
         self._save()
         self._build_main_view()
 
     def _save(self) -> None:
-        if self.game is not None:
-            save_game(self.game)
+        if self.game is not None and self.save_path is not None:
+            save_game(self.game, self.save_path)
 
     def _save_and_refresh(self) -> None:
         self._save()
@@ -1013,6 +1186,7 @@ class MegaEmpiresApp:
             parent=self.root,
         ):
             self.game = None
+            self.save_path = None
             self._new_game()
 
     def _refresh_all(self) -> None:
@@ -1026,8 +1200,10 @@ class MegaEmpiresApp:
     def _refresh_header(self) -> None:
         if self.game is None:
             return
+        save_name = self.save_path.stem if self.save_path is not None else ""
         self.status_label.configure(
             text=(
+                f"{save_name}  •  "
                 f"{GAME_MODE_LABELS[self.game.game_mode]}  •  "
                 f"{self.game.player_count} players  •  "
                 f"{self.game.ast_variant.title()} A.S.T.  •  "
@@ -1358,16 +1534,17 @@ class MegaEmpiresApp:
         content = ttk.Frame(self.sequence_tab, padding=(18, 0, 18, 18))
         content.pack(fill="both", expand=True)
 
-        phase_list = tk.Frame(content, background=BACKGROUND, width=460)
+        phase_list = tk.Frame(content, background=BACKGROUND, width=368)
         phase_list.pack(side="left", fill="y", padx=(0, 16))
         phase_list.pack_propagate(False)
         for phase in PHASES:
             selected = phase.number == self.game.current_phase
+            order_summary = self._phase_order_summary(phase)
             button = tk.Button(
                 phase_list,
                 text=(
                     f"{phase.number:>2}.  {phase.name}\n"
-                    f"      {phase.order_summary}"
+                    f"      {order_summary}"
                 ),
                 command=lambda number=phase.number: self._select_phase(number),
                 anchor="w",
@@ -1381,12 +1558,96 @@ class MegaEmpiresApp:
                 bd=0,
                 padx=12,
                 pady=5,
+                wraplength=330,
             )
             button.pack(fill="x", pady=(0, 3))
+
+        summary = tk.Frame(content, background=PANEL, width=400)
+        summary.pack(side="right", fill="y", padx=(16, 0))
+        summary.pack_propagate(False)
+        self._render_default_rules(summary, current.number)
 
         detail = tk.Frame(content, background=PANEL, padx=24, pady=18)
         detail.pack(side="left", fill="both", expand=True)
         self._render_phase_detail(detail, current)
+
+    def _render_default_rules(
+        self,
+        parent: tk.Frame,
+        current_phase: int,
+    ) -> None:
+        phase = PHASE_BY_NUMBER[current_phase]
+        tk.Label(
+            parent,
+            text="DEFAULT RULES / VALUES",
+            anchor="w",
+            font=("Segoe UI Semibold", 17),
+            background=PANEL,
+            foreground=ACCENT,
+            padx=18,
+            pady=15,
+        ).pack(fill="x")
+        tk.Label(
+            parent,
+            text=f"{current_phase}. {phase.name}",
+            anchor="w",
+            font=("Segoe UI Semibold", 13),
+            background=PANEL,
+            foreground=TEXT,
+            padx=18,
+        ).pack(fill="x", pady=(0, 14))
+
+        phase_number = 0
+        active_values: list[str] = []
+        for heading, value in DEFAULT_RULES_VALUES:
+            if heading:
+                phase_number = int(heading.split(maxsplit=1)[0])
+            if phase_number == current_phase:
+                active_values.append(value)
+
+        for value in active_values:
+            tk.Label(
+                parent,
+                text=f"•  {value}",
+                anchor="nw",
+                justify="left",
+                wraplength=350,
+                font=("Segoe UI", 12),
+                background=PANEL,
+                foreground=TEXT,
+                padx=18,
+                pady=6,
+            ).pack(fill="x")
+
+        special_rules = self._small_east_phase_rules(phase)
+        if special_rules:
+            tk.Frame(parent, background="#344258", height=1).pack(
+                fill="x",
+                padx=18,
+                pady=(14, 10),
+            )
+            tk.Label(
+                parent,
+                text="3–4 PLAYER EAST",
+                anchor="w",
+                font=("Segoe UI Semibold", 11),
+                background=PANEL,
+                foreground=ACCENT,
+                padx=18,
+            ).pack(fill="x")
+            for rule in special_rules:
+                tk.Label(
+                    parent,
+                    text=f"•  {rule.removeprefix('3–4 PLAYER EAST: ')}",
+                    anchor="nw",
+                    justify="left",
+                    wraplength=350,
+                    font=("Segoe UI", 11),
+                    background=PANEL,
+                    foreground=TEXT,
+                    padx=18,
+                    pady=5,
+                ).pack(fill="x")
 
     def _select_phase(self, phase_number: int) -> None:
         if self.game is None:
@@ -1420,7 +1681,7 @@ class MegaEmpiresApp:
         ).pack(fill="x")
         tk.Label(
             parent,
-            text=phase.order_summary.upper(),
+            text=self._phase_order_summary(phase).upper(),
             anchor="w",
             font=("Segoe UI Semibold", 13),
             background=ACCENT,
@@ -1428,18 +1689,6 @@ class MegaEmpiresApp:
             padx=12,
             pady=7,
         ).pack(fill="x", pady=(10, 12))
-
-        for rule in phase.rules:
-            tk.Label(
-                parent,
-                text=f"•  {rule}",
-                anchor="w",
-                justify="left",
-                wraplength=1120,
-                font=("Segoe UI", 11),
-                background=PANEL,
-                foreground=TEXT,
-            ).pack(fill="x", pady=2)
 
         if phase.player_order is None:
             tk.Label(
@@ -1536,6 +1785,58 @@ class MegaEmpiresApp:
                     background=PANEL,
                     foreground=MUTED,
                 ).pack(fill="x", pady=(6, 0))
+
+    def _phase_order_summary(self, phase: Phase) -> str:
+        if (
+            self.game is not None
+            and self.game.game_mode == "EAST"
+            and self.game.player_count in {3, 4}
+            and phase.number == 7
+        ):
+            return "Priority order; up to 6 market rounds"
+        return phase.order_summary
+
+    def _small_east_phase_rules(self, phase: Phase) -> tuple[str, ...]:
+        """Lisää 3–4 pelaajan East-skenaarion olennaiset pöytämuistutukset."""
+
+        if (
+            self.game is None
+            or self.game.game_mode != "EAST"
+            or self.game.player_count not in {3, 4}
+        ):
+            return ()
+        if phase.number == 6:
+            return (
+                "3–4 PLAYER EAST: Set up the Market board after regular "
+                "dealing: add 1 Water card and one face-down card from each "
+                "stack through the highest city count.",
+                "Players may buy any number of Water cards for 2 treasury "
+                "tokens each.",
+            )
+        if phase.number == 7:
+            return (
+                "3–4 PLAYER EAST: In priority order, trade with the Market "
+                "board or pass. Repeat until everyone passes consecutively "
+                "or 6 market rounds have been completed.",
+                "A trade always places exactly 2 cards and takes exactly 2 "
+                "different cards whose total value is no higher.",
+            )
+        if phase.number == 8:
+            return (
+                "3–4 PLAYER EAST: Reveal all face-down Market board cards "
+                "after trading ends.",
+            )
+        if phase.number == 9:
+            return (
+                "3–4 PLAYER EAST: Use the dedicated 3–4 player Calamity "
+                "Quick Chart and resolve calamities remaining on the Market.",
+            )
+        if phase.number == 13:
+            return (
+                "3–4 PLAYER EAST: Discard all remaining Market cards, "
+                "shuffle the discards, and place them under their stacks.",
+            )
+        return ()
 
     def _phase_order_detail(self, phase: Phase, player: PlayerState) -> str:
         civilization = CIVILIZATION_BY_NAME[player.civilization]
@@ -1751,6 +2052,11 @@ class MegaEmpiresApp:
 
         for row, player in enumerate(players):
             civilization = CIVILIZATION_BY_NAME[player.civilization]
+            era_starts = basic_ast_era_starts(
+                player.civilization,
+                self.game.player_count,
+                self.game.game_mode,
+            )
             y = top + row * row_height
             canvas.create_rectangle(
                 0,
@@ -1775,6 +2081,8 @@ class MegaEmpiresApp:
                     player.civilization,
                     step,
                     self.game.ast_variant,
+                    self.game.player_count,
+                    self.game.game_mode,
                 )
                 fill = (
                     civilization.color
@@ -1783,7 +2091,7 @@ class MegaEmpiresApp:
                 )
                 era_boundary = (
                     step > 0
-                    and step in BASIC_AST_ERA_STARTS[player.civilization]
+                    and step in era_starts
                 )
                 canvas.create_rectangle(
                     x,
@@ -1796,7 +2104,11 @@ class MegaEmpiresApp:
                     tags=(f"ast_{row}_{step}",),
                 )
                 if current:
-                    state = ast_marker_state(player)
+                    state = ast_marker_state(
+                        player,
+                        self.game.player_count,
+                        self.game.game_mode,
+                    )
                     marker_color, marker_symbol = AST_MARKER_STYLES[state]
                     radius = min(cell_width, row_height) * 0.33
                     center_x = x + cell_width / 2
@@ -1821,7 +2133,7 @@ class MegaEmpiresApp:
                         font=("Segoe UI Semibold", max(9, int(radius * 1.25))),
                         tags=(f"ast_{row}_{step}",),
                     )
-                elif step in BASIC_AST_ERA_STARTS[player.civilization]:
+                elif step in era_starts:
                     canvas.create_text(
                         x + 5,
                         y + 5,

@@ -4,10 +4,41 @@ import unittest
 from pathlib import Path
 
 from mega_empires.models import GameState, PlayerState
-from mega_empires.storage import load_game, save_game
+from mega_empires.storage import (
+    list_saved_games,
+    load_game,
+    save_game,
+    save_path_for_name,
+)
 
 
 class StorageTests(unittest.TestCase):
+    def test_named_save_path_and_listing(self) -> None:
+        game = GameState(
+            player_count=3,
+            players=[
+                PlayerState("Indus", "I", "EAST"),
+                PlayerState("Kushan", "K", "EAST"),
+                PlayerState("Parthia", "P", "EAST"),
+            ],
+            game_mode="EAST",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            save_directory = Path(directory)
+            path = save_path_for_name("Monday game", save_directory)
+            save_game(game, path)
+            saves = list_saved_games(save_directory)
+            self.assertEqual(path.name, "Monday game.json")
+            self.assertEqual(len(saves), 1)
+            self.assertEqual(saves[0].name, "Monday game")
+            self.assertEqual(saves[0].player_count, 3)
+
+    def test_invalid_save_name_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            save_path_for_name("")
+        with self.assertRaises(ValueError):
+            save_path_for_name("bad/name")
+
     def test_game_round_trip_preserves_finnish_nickname(self) -> None:
         game = GameState(
             player_count=1,

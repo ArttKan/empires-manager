@@ -25,9 +25,9 @@ class AdvancePrice:
 def starting_color_credit(player_count: int) -> int:
     """Palauta sääntöjen mukainen kaikille väreille annettava alkukrediitti."""
 
-    if player_count == 5:
+    if player_count in {3, 5}:
         return 10
-    if player_count == 6:
+    if player_count in {4, 6}:
         return 5
     return 0
 
