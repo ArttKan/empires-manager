@@ -1,0 +1,51 @@
+; Viitetiedosto. Sovita tämä palvelimella jo olevaan unitiin äläkä korvaa
+; sokkona: ExecStart-rivin moduulinimi riippuu Phase A -skeletonin tiedostosta.
+;
+; Asennus:
+;   sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;   sudo systemctl restart mega-empires-backend.service
+
+[Unit]
+Description=Mega Empires backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=megaempires
+Group=megaempires
+WorkingDirectory=/home/megaempires/mega-empires-backend
+
+; StateDirectory luo /var/lib/mega-empires, antaa sen omistajuuden palvelun
+; käyttäjälle ja avaa sen kirjoitettavaksi ProtectSystem=strict -asetuksesta
+; huolimatta. Tallennukset ovat siten koodihakemiston ulkopuolella, joten
+; git-päivitys ei voi hävittää niitä.
+StateDirectory=mega-empires
+StateDirectoryMode=0750
+Environment=MEGA_EMPIRES_DATA_DIR=/var/lib/mega-empires
+
+; Bearer-token pidetään unitissa, ei koodissa eikä gitissä.
+Environment=MEGA_EMPIRES_TOKEN=VAIHDA-TAMA
+
+ExecStart=/home/megaempires/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=2
+
+; Kun tallennukset siirtyivät /var/lib-hakemistoon, palvelu ei enää tarvitse
+; kirjoitusoikeutta omaan hakemistoonsa: ajossa oleva sovellus ei voi muuttaa
+; omaa koodiaan. Deploy-skripti kirjoittaa sinne sandboxin ulkopuolelta.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

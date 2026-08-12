@@ -1,5 +1,12 @@
-import tkinter as tk
+import importlib.util
 import unittest
+
+# Palvelinasennus on headless eikä siinä ole python3-tk-pakettia. Tällöin koko
+# moduuli ohitetaan, jotta testit voi ajaa myös palvelimella ennen käynnistystä.
+if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
+    raise unittest.SkipTest("tkinter is not installed")
+
+import tkinter as tk
 
 from mega_empires.models import GameState, PlayerState
 from mega_empires.sequence import PHASE_BY_NUMBER

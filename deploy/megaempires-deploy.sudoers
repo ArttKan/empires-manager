@@ -1,0 +1,13 @@
+# Sovelluskäyttäjällä megaempires ei ole sudo-oikeuksia. Deploy-skripti tarvitsee
+# kuitenkin yhden asian: tämän yhden palvelun uudelleenkäynnistyksen. Sääntö on
+# rajattu täsmälleen siihen komentoon, ei systemctliin yleisesti.
+#
+# Asennus (visudo tarkistaa syntaksin ennen tallennusta):
+#   sudo install -m 0440 -o root -g root \
+#       deploy/megaempires-deploy.sudoers /etc/sudoers.d/megaempires-deploy
+#   sudo visudo -c
+#
+# Sudo vertaa komentoa merkkijonona, joten deploy.sh kutsuu samaa absoluuttista
+# polkua /usr/bin/systemctl. Tarkista tarvittaessa: command -v systemctl
+
+megaempires ALL=(root) NOPASSWD: /usr/bin/systemctl restart mega-empires-backend.service

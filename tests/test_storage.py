@@ -1,15 +1,53 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from mega_empires.models import GameState, PlayerState
 from mega_empires.storage import (
+    DATA_DIRECTORY_VARIABLE,
+    REPO_SAVE_DIRECTORY,
+    data_directory,
+    default_save_path,
     list_saved_games,
     load_game,
     save_game,
     save_path_for_name,
 )
+
+
+class DataDirectoryTests(unittest.TestCase):
+    def test_repo_directory_is_used_without_the_variable(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(DATA_DIRECTORY_VARIABLE, None)
+            self.assertEqual(data_directory(), REPO_SAVE_DIRECTORY)
+            self.assertEqual(default_save_path().parent, REPO_SAVE_DIRECTORY)
+
+    def test_environment_variable_overrides_the_repo_directory(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {DATA_DIRECTORY_VARIABLE: "/var/lib/mega-empires"},
+        ):
+            self.assertEqual(data_directory(), Path("/var/lib/mega-empires"))
+            self.assertEqual(
+                default_save_path(),
+                Path("/var/lib/mega-empires/nykyinen_peli.json"),
+            )
+
+    def test_blank_variable_falls_back_to_the_repo_directory(self) -> None:
+        with mock.patch.dict(os.environ, {DATA_DIRECTORY_VARIABLE: "   "}):
+            self.assertEqual(data_directory(), REPO_SAVE_DIRECTORY)
+
+    def test_named_saves_follow_the_configured_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                os.environ,
+                {DATA_DIRECTORY_VARIABLE: directory},
+            ):
+                path = save_path_for_name("Sunday game")
+                self.assertEqual(path.parent, Path(directory))
 
 
 class StorageTests(unittest.TestCase):

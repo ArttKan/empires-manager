@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +11,26 @@ from pathlib import Path
 from .models import GameState
 
 
-SAVE_DIRECTORY = Path(__file__).resolve().parent.parent / "tallennukset"
-DEFAULT_SAVE_PATH = SAVE_DIRECTORY / "nykyinen_peli.json"
+# Palvelinasennuksessa tallennukset eivät saa olla lähdekoodihakemistossa, koska
+# git-pohjainen päivitys korvaa sen sisällön. Ympäristömuuttuja ohittaa siksi
+# repon oletushakemiston. Hakemisto ratkaistaan vasta kutsuhetkellä, jotta
+# systemd voi asettaa muuttujan ennen prosessin käynnistystä.
+DATA_DIRECTORY_VARIABLE = "MEGA_EMPIRES_DATA_DIR"
+REPO_SAVE_DIRECTORY = Path(__file__).resolve().parent.parent / "tallennukset"
+DEFAULT_SAVE_NAME = "nykyinen_peli.json"
+
+
+def data_directory() -> Path:
+    """Palauta tallennushakemisto ympäristömuuttujasta tai repon oletuksesta."""
+
+    configured = os.environ.get(DATA_DIRECTORY_VARIABLE, "").strip()
+    return Path(configured).expanduser() if configured else REPO_SAVE_DIRECTORY
+
+
+def default_save_path() -> Path:
+    """Palauta oletustallennuksen polku nykyisestä tallennushakemistosta."""
+
+    return data_directory() / DEFAULT_SAVE_NAME
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,9 +42,10 @@ class SavedGame:
     game_mode: str
 
 
-def save_path_for_name(name: str, directory: Path = SAVE_DIRECTORY) -> Path:
+def save_path_for_name(name: str, directory: Path | None = None) -> Path:
     """Muodosta käyttäjän antamasta pelinimestä turvallinen JSON-polku."""
 
+    directory = data_directory() if directory is None else directory
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Enter a name for the saved game.")
@@ -37,9 +57,10 @@ def save_path_for_name(name: str, directory: Path = SAVE_DIRECTORY) -> Path:
     return directory / f"{filename}.json"
 
 
-def list_saved_games(directory: Path = SAVE_DIRECTORY) -> tuple[SavedGame, ...]:
+def list_saved_games(directory: Path | None = None) -> tuple[SavedGame, ...]:
     """Listaa avattavissa olevat tallennukset uusimmasta vanhimpaan."""
 
+    directory = data_directory() if directory is None else directory
     if not directory.is_dir():
         return ()
     saves: list[SavedGame] = []
@@ -68,7 +89,8 @@ def list_saved_games(directory: Path = SAVE_DIRECTORY) -> tuple[SavedGame, ...]:
     )
 
 
-def save_game(game: GameState, path: Path = DEFAULT_SAVE_PATH) -> None:
+def save_game(game: GameState, path: Path | None = None) -> None:
+    path = default_save_path() if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_suffix(".tmp")
     temporary_path.write_text(
@@ -78,10 +100,12 @@ def save_game(game: GameState, path: Path = DEFAULT_SAVE_PATH) -> None:
     temporary_path.replace(path)
 
 
-def load_game(path: Path = DEFAULT_SAVE_PATH) -> GameState:
+def load_game(path: Path | None = None) -> GameState:
+    path = default_save_path() if path is None else path
     data = json.loads(path.read_text(encoding="utf-8"))
     return GameState.from_dict(data)
 
 
-def save_exists(path: Path = DEFAULT_SAVE_PATH) -> bool:
+def save_exists(path: Path | None = None) -> bool:
+    path = default_save_path() if path is None else path
     return path.is_file()
