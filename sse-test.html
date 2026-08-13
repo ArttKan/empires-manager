@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSE connection test</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; font-size: 1.2rem; }
+    .big { font-size: 3rem; font-weight: bold; }
+    .ok { color: green; }
+    .stale { color: red; }
+    #log { font-size: 0.9rem; color: #555; margin-top: 2rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div>Latest tick:</div>
+  <div class="big" id="tick">—</div>
+  <div>Seconds since last event: <span id="age">—</span></div>
+  <div id="status">connecting…</div>
+  <div id="log"></div>
+
+  <script>
+    const tickEl = document.getElementById('tick');
+    const ageEl = document.getElementById('age');
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+
+    let lastReceived = null;
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString();
+      logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+    }
+
+    const es = new EventSource('https://empiresmanager.com/events');
+
+    es.addEventListener('tick', (e) => {
+      tickEl.textContent = e.data;
+      lastReceived = Date.now();
+      statusEl.textContent = 'receiving';
+      statusEl.className = '';
+    });
+
+    es.onopen = () => log('connection opened');
+    es.onerror = (e) => {
+      log('error / connection dropped, readyState=' + es.readyState);
+      statusEl.textContent = 'ERROR — see log';
+    };
+
+    setInterval(() => {
+      if (lastReceived === null) return;
+      const secs = Math.round((Date.now() - lastReceived) / 1000);
+      ageEl.textContent = secs;
+      ageEl.className = secs > 5 ? 'stale' : 'ok';
+    }, 1000);
+  </script>
+</body>
+</html>

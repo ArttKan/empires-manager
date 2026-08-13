@@ -26,25 +26,36 @@ toimivaksi.
 
 ### 0. Kehityskoneella: skeleton gittiin
 
-Ilman tätä git-checkout tuottaa hakemiston, jossa ei ole `server.py`-tiedostoa ja
+Ilman tätä git-checkout tuottaa hakemiston, jossa ei ole `main.py`-tiedostoa ja
 `ExecStart` epäonnistuu.
 
+Palvelimella on kolme tiedostoa, jotka kuuluvat gittiin: `main.py`,
+`requirements.txt` ja `sse-test.html`. `__pycache__` jää pois — se on jo
+`.gitignore`ssa.
+
 ```bash
-# Hae skeleton ja sen riippuvuudet palvelimelta (SSH vain Tailscalen kautta).
-scp arttu@<tailscale-ip>:/home/megaempires/mega-empires-backend/server.py .
-ssh arttu@<tailscale-ip> \
-    'sudo -u megaempires /home/megaempires/venv/bin/pip freeze' > requirements.txt
+# SSH toimii vain Tailscalen kautta.
+REMOTE=arttu@<tailscale-ip>:/home/megaempires/mega-empires-backend
+scp "$REMOTE/main.py" "$REMOTE/requirements.txt" "$REMOTE/sse-test.html" .
 ```
 
-Karsi `requirements.txt` suoriin riippuvuuksiin (fastapi, uvicorn) tai jätä koko
-freeze sellaisenaan. Versiot on poimittu palvelimen Python 3.10:stä, joka on se
-ympäristö jolla on merkitystä.
+Tarkista `requirements.txt`: jos se on käsin kirjoitettu ilman versioita, korvaa
+se palvelimen todellisilla versioilla, koska Python 3.10 on se ympäristö jolla on
+merkitystä:
 
 ```bash
-git add server.py requirements.txt
+ssh arttu@<tailscale-ip> \
+    'sudo -u megaempires <venv>/bin/pip freeze' > requirements.txt
+```
+
+```bash
+git add main.py requirements.txt sse-test.html
 git commit -m "Lisää Phase A -skeleton ja riippuvuudet"
 git push origin backend-sekoilu
 ```
+
+`sse-test.html` tarvitaan mukaan, koska `main.py` palvelee sen `/sse-test`
+-reitiltä suhteellisella polulla. Ilman sitä reitti hajoaa.
 
 **Haara:** koko backend-työ tehdään `backend-sekoilu`-haarassa ja `master`
 jätetään koskematta, kunnes ketju on todettu kokonaisuudessaan toimivaksi.
@@ -52,8 +63,20 @@ jätetään koskematta, kunnes ketju on todettu kokonaisuudessaan toimivaksi.
 
 ### 1. Palvelu alas ja vanha hakemisto talteen
 
+Selvitä ensin, missä nykyinen venv on. Käytössä oleva unit tietää sen:
+
 ```bash
 ssh arttu@<tailscale-ip>
+systemctl cat mega-empires-backend.service | grep -E 'ExecStart|Environment'
+ls -a /home/megaempires/mega-empires-backend
+```
+
+Jos venv on **sovellushakemiston sisällä** (esim. `.venv`), se katoaa kun hakemisto
+siirretään — mikä on tässä hyväksyttävää, koska uusi venv luodaan joka tapauksessa
+kohdassa 3. Varmista vain, että talteen otetut `Environment=`-rivit, erityisesti
+bearer-token, ovat tiedossa ennen kuin unit korvataan.
+
+```bash
 sudo systemctl stop mega-empires-backend.service
 sudo -u megaempires mv /home/megaempires/mega-empires-backend \
                        /home/megaempires/mega-empires-backend.bak

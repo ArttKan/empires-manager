@@ -1,5 +1,5 @@
 ; Viitetiedosto. Sovita tämä palvelimella jo olevaan unitiin äläkä korvaa
-; sokkona: ExecStart-rivin moduulinimi riippuu Phase A -skeletonin tiedostosta.
+; sokkona: tarkista erityisesti venvin polku ja bearer-token.
 ;
 ; Asennus:
 ;   sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
@@ -25,10 +25,15 @@ StateDirectory=mega-empires
 StateDirectoryMode=0750
 Environment=MEGA_EMPIRES_DATA_DIR=/var/lib/mega-empires
 
-; Bearer-token pidetään unitissa, ei koodissa eikä gitissä.
-Environment=MEGA_EMPIRES_TOKEN=VAIHDA-TAMA
+; Bearer-token pidetään unitissa, ei koodissa eikä gitissä. Nimen on vastattava
+; main.py:n lukemaa muuttujaa (ECHO_TOKEN); main.py lukee sen tuontihetkellä ja
+; kieltäytyy palvelemasta /echo-reittiä jos se puuttuu, joten väärä nimi näkyy
+; vasta HTTP 500 -vastauksena eikä käynnistysvirheenä.
+Environment=ECHO_TOKEN=VAIHDA-TAMA
 
-ExecStart=/home/megaempires/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+; Sovellus on main.py ja se palvelee myös sse-test.html-tiedoston suhteellisella
+; polulla, joten WorkingDirectory on merkityksellinen eikä vain kosmeettinen.
+ExecStart=/home/megaempires/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=2
 
