@@ -41,7 +41,7 @@ async def sse_test():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+    return {"status": "changes live", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/state")
