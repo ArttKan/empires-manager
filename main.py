@@ -37,6 +37,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from mega_empires.models import GameState
 from mega_empires.service import (
     CommandError,
     CommandResult,
@@ -298,6 +299,43 @@ async def set_turn(body: TurnBody) -> dict:
             body.actor,
         )
     )
+
+
+@app.post("/game", dependencies=[Depends(require_token)])
+async def create_game(payload: dict) -> dict:
+    """Asenna uusi peli ja korvaa nykyinen.
+
+    Työpöytäsovelluksen uuden pelin velho tuottaa valmiin `GameState`-rakenteen,
+    joten palvelimen ei tarvitse toistaa skenaariologiikkaa: se ottaa vastaan
+    serialisoidun tilan ja ottaa sen käyttöön.
+
+    Korvaa myös välimuistissa olevan palvelun, joten palvelua ei tarvitse
+    käynnistää uudelleen — se oli aiemmin ainoa tapa vaihtaa peliä.
+    """
+
+    try:
+        game = GameState.from_dict(payload)
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=422, detail=f"Not a valid game: {error}"
+        )
+    if not game.players:
+        raise HTTPException(status_code=422, detail="A game needs players.")
+
+    # Uusi peli alkaa versiosta 0, jottei vanhan pelin laskuri jää voimaan.
+    game.state_version = 0
+    for player in game.players:
+        player.version = 0
+
+    path = default_save_path()
+    async with _lock:
+        service = LocalGameService(game, save_path=path)
+        service.save()
+        set_service(service)
+        version = service.snapshot().state_version
+
+    await broadcast(version)
+    return {"state_version": version, "player_count": game.player_count}
 
 
 @app.post("/echo", dependencies=[Depends(require_token)])

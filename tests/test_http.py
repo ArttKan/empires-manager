@@ -225,6 +225,68 @@ class _StubRequest:
         return self._calls > self._limit
 
 
+class CreateGameTests(HttpTestCase):
+    def _payload(self, players: int = 3) -> dict:
+        return GameState(
+            player_count=players,
+            players=[
+                PlayerState("Saba", "S", "EAST"),
+                PlayerState("Persia", "P", "EAST"),
+                PlayerState("Parthia", "X", "EAST"),
+            ][:players],
+            game_mode="EAST",
+        ).to_dict()
+
+    def test_create_replaces_the_current_game(self) -> None:
+        response = self.client.post(
+            "/game", json=self._payload(), headers=AUTH
+        )
+
+        self.assertEqual(response.status_code, 200)
+        state = self.client.get("/state", headers=AUTH).json()
+        self.assertEqual(state["game_mode"], "EAST")
+        self.assertEqual(
+            [p["civilization"] for p in state["players"]],
+            ["Saba", "Persia", "Parthia"],
+        )
+
+    def test_create_resets_the_version_counters(self) -> None:
+        """Uusi peli ei saa periä vanhan pelin versiolaskureita."""
+
+        self.client.post(
+            "/players/Hellas/cities", json={"value": 5}, headers=AUTH
+        )
+        payload = self._payload()
+        payload["state_version"] = 99
+        payload["players"][0]["version"] = 42
+
+        self.client.post("/game", json=payload, headers=AUTH)
+
+        state = self.client.get("/state", headers=AUTH).json()
+        self.assertEqual(state["state_version"], 0)
+        self.assertEqual(state["players"][0]["version"], 0)
+
+    def test_create_needs_a_token(self) -> None:
+        response = self.client.post("/game", json=self._payload())
+        self.assertEqual(response.status_code, 401)
+
+    def test_empty_game_is_rejected(self) -> None:
+        response = self.client.post(
+            "/game", json={"player_count": 0, "players": []}, headers=AUTH
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_persists_without_a_restart(self) -> None:
+        self.client.post("/game", json=self._payload(), headers=AUTH)
+
+        saved = json.loads(
+            (Path(self._directory.name) / "nykyinen_peli.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(saved["game_mode"], "EAST")
+
+
 class EventStreamTests(HttpTestCase):
     """Virtaa ajetaan generaattorina eikä HTTP-vasteena.
 

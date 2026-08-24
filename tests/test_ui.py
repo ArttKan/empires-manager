@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import tempfile
 import time
@@ -585,6 +586,88 @@ class RemoteModeTests(unittest.TestCase):
         self.assertTrue(info.called)
         self.assertEqual(self.app.game.state_version, 5)
 
+    def test_poll_mirrors_new_state_to_disk(self) -> None:
+        """Peili on se, mikä tekee varatilasta hyödyllisen."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                os.environ, {DATA_DIRECTORY_VARIABLE: directory}
+            ):
+                newer = self._game(state_version=9, cities=6)
+                self.app.service = _StubRemote([newer])
+                self.app._refresh_all = lambda: None
+
+                self.app._poll()
+                self.root.after_cancel(self.app._poll_job)
+
+                mirror = self.app._mirror_path()
+                self.assertTrue(mirror.is_file())
+                saved = json.loads(mirror.read_text(encoding="utf-8"))
+                self.assertEqual(saved["players"][0]["cities"], 6)
+
+    def test_unchanged_state_is_not_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                os.environ, {DATA_DIRECTORY_VARIABLE: directory}
+            ):
+                same = self._game(state_version=1)
+                self.app.service = _StubRemote([same])
+                self.app._refresh_all = lambda: None
+
+                self.app._poll()
+                self.root.after_cancel(self.app._poll_job)
+
+                self.assertFalse(self.app._mirror_path().is_file())
+
+    def test_offline_offer_preselects_the_mirror_but_still_asks(self) -> None:
+        """Ohjelma ei saa päättää käyttäjän puolesta mitä peliä jatketaan."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                os.environ, {DATA_DIRECTORY_VARIABLE: directory}
+            ):
+                self.app._mirror_state(self._game(state_version=4, cities=7))
+                calls = []
+                self.app._start_local = lambda **kw: calls.append(kw)
+                self.app._load_selected_game = lambda path: self.fail(
+                    "must offer the list, not open a game directly"
+                )
+
+                with mock.patch.object(
+                    ui_module.messagebox, "askyesno", return_value=True
+                ) as ask:
+                    self.app._offer_offline("server down")
+
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0]["preselect"], self.app._mirror_path())
+                self.assertEqual(calls[0]["reason"], "server down")
+                self.assertIn("Continue offline", ask.call_args[0][1])
+
+    def test_offline_offer_has_nothing_preselected_without_a_mirror(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                os.environ, {DATA_DIRECTORY_VARIABLE: directory}
+            ):
+                calls = []
+                self.app._start_local = lambda **kw: calls.append(kw)
+
+                with mock.patch.object(
+                    ui_module.messagebox, "askyesno", return_value=True
+                ):
+                    self.app._offer_offline("server down")
+
+                self.assertEqual(len(calls), 1)
+                self.assertIsNone(calls[0]["preselect"])
+
+    def test_offline_banner_names_the_reason(self) -> None:
+        banner = self.app._local_destination("server down")
+
+        self.assertIn("SERVER UNAVAILABLE", banner)
+        self.assertIn("server down", banner)
+        self.assertIn("LOCAL GAME", banner)
+
     def test_census_typing_is_debounced_into_one_command(self) -> None:
         self.app.service = _StubRemote([self._game()])
         commits = []
@@ -604,6 +687,155 @@ class RemoteModeTests(unittest.TestCase):
             time.sleep(0.02)
 
         self.assertEqual(commits, ["45"])
+
+
+class DestinationBannerTests(unittest.TestCase):
+    """Käynnistysnäkymien on kerrottava mihin peli tallentuu.
+
+    Ilman tätä uuden pelin velho näyttää samalta riippumatta siitä päätyykö peli
+    koneelle vai palvelimelle.
+    """
+
+    def setUp(self) -> None:
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as error:
+            raise unittest.SkipTest(f"no display: {error}")
+        self.root.withdraw()
+        ui_module._configure_styles(self.root)
+        self._directory = tempfile.TemporaryDirectory()
+        self._environment = mock.patch.dict(
+            os.environ, {DATA_DIRECTORY_VARIABLE: self._directory.name}
+        )
+        self._environment.start()
+        self.app = object.__new__(MegaEmpiresApp)
+        self.app.root = self.root
+        self.app.game = None
+        self.app.service = None
+        self.app.save_path = None
+
+    def tearDown(self) -> None:
+        self.root.destroy()
+        self._environment.stop()
+        self._directory.cleanup()
+
+    @staticmethod
+    def _banners(widget) -> list:
+        found = []
+        for child in widget.winfo_children():
+            if isinstance(child, tk.Label) and "GAME —" in child.cget("text"):
+                found.append(child.cget("text"))
+            found.extend(DestinationBannerTests._banners(child))
+        return found
+
+    def test_local_wizard_names_the_save_directory(self) -> None:
+        wizard = ui_module.NewGameWizard(
+            self.root, lambda *a: None, destination=self.app._local_destination()
+        )
+        self.root.update_idletasks()
+        try:
+            banners = self._banners(wizard)
+            self.assertEqual(len(banners), 1)
+            self.assertIn("LOCAL GAME", banners[0])
+            self.assertIn(self._directory.name, banners[0])
+            self.assertTrue(wizard.ask_name)
+        finally:
+            wizard.destroy()
+
+    def test_remote_wizard_names_the_server_and_hides_the_name_field(
+        self,
+    ) -> None:
+        """Etätilassa nimi jäisi käyttämättä, joten sitä ei kysytä."""
+
+        self.app.service = RemoteGameService("https://example.test", "tok")
+        wizard = ui_module.NewGameWizard(
+            self.root,
+            lambda *a: None,
+            destination=self.app._remote_destination(),
+            ask_name=False,
+        )
+        self.root.update_idletasks()
+        try:
+            banners = self._banners(wizard)
+            self.assertEqual(len(banners), 1)
+            self.assertIn("REMOTE GAME", banners[0])
+            self.assertIn("https://example.test", banners[0])
+            self.assertFalse(wizard.ask_name)
+            self.assertTrue(wizard.save_name.get())
+        finally:
+            wizard.destroy()
+
+    def test_dialog_preselects_the_requested_save(self) -> None:
+        """Peili esivalitaan, mutta muut tallennukset ovat yhä valittavissa."""
+
+        from mega_empires.storage import SavedGame
+
+        saves = tuple(
+            SavedGame(
+                name=name,
+                path=Path(self._directory.name) / f"{name}.json",
+                saved_at="2026-08-24T12:00:00",
+                player_count=3,
+                game_mode="WEST",
+            )
+            for name in ("perjantai", "palvelinpeli", "lauantai")
+        )
+        target = saves[1].path
+
+        dialog = ui_module.SavedGameDialog(
+            self.root,
+            saves,
+            lambda path: None,
+            lambda: None,
+            preselect=target,
+        )
+        self.root.update_idletasks()
+        try:
+            self.assertEqual(dialog.tree.selection(), ("1",))
+            # Muut vaihtoehdot ovat yhä listassa.
+            self.assertEqual(len(dialog.tree.get_children()), 3)
+        finally:
+            dialog.destroy()
+
+    def test_dialog_defaults_to_the_first_save_without_preselection(
+        self,
+    ) -> None:
+        from mega_empires.storage import SavedGame
+
+        saves = tuple(
+            SavedGame(
+                name=name,
+                path=Path(self._directory.name) / f"{name}.json",
+                saved_at="2026-08-24T12:00:00",
+                player_count=3,
+                game_mode="WEST",
+            )
+            for name in ("eka", "toka")
+        )
+        dialog = ui_module.SavedGameDialog(
+            self.root, saves, lambda path: None, lambda: None
+        )
+        self.root.update_idletasks()
+        try:
+            self.assertEqual(dialog.tree.selection(), ("0",))
+        finally:
+            dialog.destroy()
+
+    def test_saved_game_dialog_names_the_save_directory(self) -> None:
+        dialog = ui_module.SavedGameDialog(
+            self.root,
+            (),
+            lambda path: None,
+            lambda: None,
+            destination=self.app._local_destination(),
+        )
+        self.root.update_idletasks()
+        try:
+            banners = self._banners(dialog)
+            self.assertEqual(len(banners), 1)
+            self.assertIn(self._directory.name, banners[0])
+        finally:
+            dialog.destroy()
 
 
 if __name__ == "__main__":

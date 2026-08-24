@@ -35,6 +35,13 @@ from .service import (
 
 DEFAULT_TIMEOUT = 3.0
 
+# Cloudflare torjuu urllibin oletusotsakkeen "Python-urllib/3.x" virhekoodilla
+# 1010 ("browser signature banned"), joten jokainen pyyntö palautuisi 403:na.
+# Riittää, että sovellus kertoo rehellisesti kuka on — selaimeksi ei tarvitse
+# tekeytyä. Tämä ei paljastu testeissä, koska ne puhuvat suoraan 127.0.0.1:lle
+# eivätkä kulje Cloudflaren läpi.
+USER_AGENT = "MegaEmpires-Desktop/1.0 (+https://empiresmanager.com)"
+
 
 class RemoteGameService(GameService):
     def __init__(
@@ -175,6 +182,16 @@ class RemoteGameService(GameService):
         }
         return self._result(self._request("POST", "/turn", payload))
 
+    def create_game(self, game: GameState) -> int:
+        """Asenna peli palvelimelle ja palauta uusi state_version.
+
+        Ei ole osa `GameService`-rajapintaa: paikallisessa tilassa uusi peli
+        syntyy tiedostoon, ei komennolla.
+        """
+
+        data = self._request("POST", "/game", game.to_dict())
+        return int(data["state_version"])
+
     # -- sisäiset ------------------------------------------------------------
 
     def _command(
@@ -208,7 +225,10 @@ class RemoteGameService(GameService):
         request = urllib.request.Request(
             self.base_url + path,
             method=method,
-            headers={"Authorization": f"Bearer {self.token}"},
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "User-Agent": USER_AGENT,
+            },
         )
         if payload is not None:
             request.add_header("Content-Type", "application/json")

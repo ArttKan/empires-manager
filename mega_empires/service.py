@@ -242,6 +242,15 @@ class LocalGameService(GameService):
     def state_version(self) -> int:
         return self._game.state_version
 
+    def save(self) -> None:
+        """Kirjoita tilannekuva levylle ilman komentoa.
+
+        Tarvitaan kun peli otetaan käyttöön sellaisenaan (uusi peli), jolloin
+        mitään komentoa ei ole suoritettu mutta tila on silti tallennettava.
+        """
+
+        self._save()
+
     # -- komennot -----------------------------------------------------------
 
     def set_cities(

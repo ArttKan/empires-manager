@@ -28,6 +28,7 @@ from .data import (
 from .credits import advance_price, color_credits, flexible_credit_entitlement
 from .models import GameState, PlayerState
 from .scoring import calculate_score, players_in_ast_order, visible_rankings
+from .config import load_server_config
 from .remote import RemoteGameService
 from .service import (
     CommandError,
@@ -46,6 +47,7 @@ from .sequence import (
     phase_order,
 )
 from .storage import (
+    data_directory,
     SavedGame,
     list_saved_games,
     load_game,
@@ -65,8 +67,6 @@ ERROR = "#b94141"
 # Etäpalvelinta käytettäessä muutokset voivat tulla puhelimista, joten näkymä
 # kysyy tuoretta tilaa ajastimella. Kysely on halpa: se vertaa vain
 # state_versionia eikä piirrä mitään jos mikään ei muuttunut.
-SERVER_VARIABLE = "MEGA_EMPIRES_SERVER"
-TOKEN_VARIABLE = "MEGA_EMPIRES_TOKEN"
 POLL_INTERVAL_MS = 2000
 # Yhteyden katkettua kysely harvenee: urllib on estävä, joten tiheä kysely
 # kuollutta palvelinta vasten jumittaisi käyttöliittymän aikakatkaisun ajaksi.
@@ -74,6 +74,10 @@ POLL_BACKOFF_MS = 15000
 # Census-kenttä kirjoittaa jokaisella näppäimen nousulla. Paikallisesti se on
 # ilmaista, verkon yli se olisi pyyntö per merkki.
 CENSUS_DEBOUNCE_MS = 400
+# Etätilassa pelitila peilataan paikalliseen tiedostoon aina kun se
+# muuttuu. Ilman peiliä varatila olisi hyödytön: peli on palvelimella, joten
+# ilman kopiota paikallinen tila aloittaisi tyhjästä kesken pelin.
+MIRROR_SAVE_NAME = "palvelinpeli"
 AST_ERA_COLORS = (
     "#354252",
     "#51463f",
@@ -258,6 +262,35 @@ def _configure_styles(root: tk.Tk) -> None:
     )
 
 
+def _destination_banner(parent: tk.Widget, text: str) -> tk.Widget:
+    """Kertoo mihin peli tallentuu.
+
+    Ilman tätä uuden pelin velho ja tallennusvalinta näyttävät identtisiltä
+    riippumatta siitä ollaanko paikallisessa vai etätilassa, eikä käyttäjä voi
+    tietää päätyykö peli koneelle vai palvelimelle.
+    """
+
+    frame = tk.Frame(
+        parent,
+        background=PANEL_ALT,
+        highlightbackground="#344258",
+        highlightthickness=1,
+    )
+    tk.Label(
+        frame,
+        text=text,
+        anchor="w",
+        justify="left",
+        wraplength=620,
+        font=("Segoe UI", 10),
+        background=PANEL_ALT,
+        foreground=TEXT,
+        padx=12,
+        pady=8,
+    ).pack(fill="x")
+    return frame
+
+
 class NewGameWizard(tk.Toplevel):
     """Ohjattu uuden pelin perustaminen."""
 
@@ -265,7 +298,16 @@ class NewGameWizard(tk.Toplevel):
         self,
         parent: tk.Tk,
         on_complete: Callable[[GameState, Path], None],
+        destination: str = "",
+        ask_name: bool = True,
     ) -> None:
+        """`destination` kertoo mihin peli päätyy, `ask_name` kysytäänkö nimi.
+
+        Etätilassa nimeä ei kysytä, koska palvelin tallentaa pelin aina samaan
+        paikkaan: kysytty nimi jäisi käyttämättä, mikä on pahempaa kuin sen
+        puuttuminen.
+        """
+
         super().__init__(parent)
         self.title("New Mega Empires Game")
         self.configure(background=BACKGROUND)
@@ -276,6 +318,8 @@ class NewGameWizard(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", parent.destroy)
 
         self.on_complete = on_complete
+        self.destination = destination
+        self.ask_name = ask_name
         self.player_count = tk.IntVar(value=16)
         self.game_mode = tk.StringVar(value="BOTH")
         self.nickname = tk.StringVar()
@@ -301,19 +345,33 @@ class NewGameWizard(tk.Toplevel):
         ).pack(anchor="w", pady=(20, 8))
         ttk.Label(
             self.content,
-            text="Name the save and select the game boxes and player count.",
+            text=(
+                "Name the save and select the game boxes and player count."
+                if self.ask_name
+                else "Select the game boxes and player count."
+            ),
             style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(0, 24))
+        ).pack(anchor="w", pady=(0, 12))
 
-        name_frame = ttk.Frame(self.content)
-        name_frame.pack(fill="x", pady=(0, 20))
-        ttk.Label(name_frame, text="Saved game name").pack(side="left")
-        ttk.Entry(
-            name_frame,
-            textvariable=self.save_name,
-            font=("Segoe UI", 13),
-            width=32,
-        ).pack(side="right", fill="x", expand=True, padx=(24, 0))
+        if self.destination:
+            _destination_banner(self.content, self.destination).pack(
+                fill="x", pady=(0, 18)
+            )
+
+        if self.ask_name:
+            name_frame = ttk.Frame(self.content)
+            name_frame.pack(fill="x", pady=(0, 20))
+            ttk.Label(name_frame, text="Saved game name").pack(side="left")
+            ttk.Entry(
+                name_frame,
+                textvariable=self.save_name,
+                font=("Segoe UI", 13),
+                width=32,
+            ).pack(side="right", fill="x", expand=True, padx=(24, 0))
+        else:
+            # Polkua ei käytetä etätilassa, mutta se rakennetaan silti samaa
+            # koodipolkua pitkin. Kiinteä nimi pitää validoinnin tyytyväisenä.
+            self.save_name.set(MIRROR_SAVE_NAME)
 
         mode_frame = ttk.LabelFrame(self.content, text="Game boxes", padding=14)
         mode_frame.pack(fill="x", pady=(0, 20))
@@ -1183,6 +1241,8 @@ class SavedGameDialog(tk.Toplevel):
         saves: tuple[SavedGame, ...],
         on_open: Callable[[Path], None],
         on_new: Callable[[], None],
+        destination: str = "",
+        preselect: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.title("Mega Empires – Saved Games")
@@ -1208,6 +1268,10 @@ class SavedGameDialog(tk.Toplevel):
             text="Continue an existing game or start a new one.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(0, 22))
+        if destination:
+            _destination_banner(content, destination).pack(
+                fill="x", pady=(0, 14)
+            )
 
         self.tree = ttk.Treeview(
             content,
@@ -1238,9 +1302,16 @@ class SavedGameDialog(tk.Toplevel):
                     saved_at,
                 ),
             )
+        chosen = "0"
+        if preselect is not None:
+            for index, save in enumerate(saves):
+                if save.path == preselect:
+                    chosen = str(index)
+                    break
         if saves:
-            self.tree.selection_set("0")
-            self.tree.focus("0")
+            self.tree.selection_set(chosen)
+            self.tree.focus(chosen)
+            self.tree.see(chosen)
         self.tree.bind("<Double-1>", lambda _event: self._open_selected())
 
         buttons = ttk.Frame(content)
@@ -2330,19 +2401,51 @@ class MegaEmpiresApp:
         self._startup()
 
     def _startup(self) -> None:
-        server = os.environ.get(SERVER_VARIABLE, "").strip()
-        if server:
-            self._connect_remote(server)
+        config = load_server_config()
+        if config is not None:
+            self._connect_remote(config)
             return
+        self._start_local()
+
+    def _start_local(
+        self,
+        reason: str = "",
+        preselect: Path | None = None,
+    ) -> None:
         saves = list_saved_games()
+        destination = self._local_destination(reason)
         if not saves:
-            self._new_game()
+            self._new_game(destination)
             return
         SavedGameDialog(
             self.root,
             saves,
             self._load_selected_game,
-            self._new_game,
+            lambda: self._new_game(destination),
+            destination=destination,
+            preselect=preselect,
+        )
+
+    @staticmethod
+    def _local_destination(reason: str = "") -> str:
+        prefix = (
+            f"SERVER UNAVAILABLE — {reason}\n"
+            if reason
+            else ""
+        )
+        return (
+            prefix
+            + "LOCAL GAME — this computer only.\n"
+            f"Saved games are in {data_directory()}"
+        )
+
+    def _remote_destination(self) -> str:
+        service = self.service
+        url = service.base_url if isinstance(service, RemoteGameService) else "?"
+        return (
+            f"REMOTE GAME — stored on the server at {url}.\n"
+            "Everyone connected to that server sees this game. A copy is kept "
+            "on this computer so play can continue if the server is lost."
         )
 
     def _load_selected_game(self, path: Path) -> None:
@@ -2356,45 +2459,117 @@ class MegaEmpiresApp:
             )
             self._startup()
 
-    def _connect_remote(self, base_url: str) -> None:
+    def _connect_remote(self, config) -> None:
         """Liity palvelimella olevaan peliin.
 
-        Etätilassa peli on palvelimella eikä paikallisia tallennuksia avata:
-        totuus on yksi, ja tämä näkymä on sen asiakas.
+        Palvelin on normaali tila. Jos siihen ei saada yhteyttä, tarjotaan
+        paikallista varatilaa — mieluiten peilistä, jotta kesken oleva peli
+        jatkuu eikä ala alusta.
         """
 
-        service = RemoteGameService(
-            base_url, os.environ.get(TOKEN_VARIABLE, "")
-        )
+        service = RemoteGameService(config.url, config.token)
         try:
             game = service.snapshot()
-        except CommandError as error:
-            if not messagebox.askyesno(
-                "Could not reach the game server",
-                f"{error}\n\nStart a local game instead?",
-                icon="warning",
-                parent=self.root,
-            ):
-                self.root.destroy()
-                return
-            saves = list_saved_games()
-            if saves:
-                SavedGameDialog(
-                    self.root, saves, self._load_selected_game, self._new_game
+        except ServiceUnavailable as error:
+            # 503 tarkoittaa "yhteys on, mutta peliä ei ole" — silloin oikea
+            # vastaus on velho eikä varatila. Muut syyt ovat aitoja katkoja.
+            if "No saved game" in str(error):
+                self.service = service
+                self.save_path = None
+                messagebox.showinfo(
+                    "No game on the server",
+                    "The server is reachable but has no game yet. "
+                    "Create one now — it will be stored on the server.",
+                    parent=self.root,
                 )
-            else:
-                self._new_game()
+                for child in self.root.winfo_children():
+                    child.destroy()
+                NewGameWizard(
+                    self.root,
+                    self._install_remote_game,
+                    destination=self._remote_destination(),
+                    ask_name=False,
+                )
+                return
+            self._offer_offline(str(error))
+            return
+        except CommandError as error:
+            self._offer_offline(str(error))
             return
         self.service = service
         self.save_path = None
         self.game = game
+        self._mirror_state(game)
         self._build_main_view()
         self._poll()
 
-    def _new_game(self) -> None:
+    def _offer_offline(self, reason: str) -> None:
+        """Tarjoa paikallista tilaa kun palvelinta ei tavoiteta.
+
+        Peiliä ei avata automaattisesti, vaan se esivalitaan listasta. Käyttäjä
+        voi silti valita toisen tallennuksen tai aloittaa uuden pelin — ohjelma
+        ei päätä hänen puolestaan mitä peliä ollaan pelaamassa.
+        """
+
+        mirror = self._mirror_path()
+        if not messagebox.askyesno(
+            "Could not reach the game server",
+            f"{reason}\n\nContinue offline on this computer?",
+            icon="warning",
+            parent=self.root,
+        ):
+            self.root.destroy()
+            return
+        self._start_local(
+            reason=reason,
+            preselect=mirror if mirror.is_file() else None,
+        )
+
+    def _mirror_path(self) -> Path:
+        return save_path_for_name(MIRROR_SAVE_NAME)
+
+    def _mirror_state(self, game: GameState) -> None:
+        """Kirjoita palvelimen tila paikalliseen kopioon.
+
+        Kutsutaan vain kun versio on muuttunut, joten kirjoituksia tulee
+        muutosten tahtiin eikä kyselyn tahtiin.
+        """
+
+        try:
+            save_game(game, self._mirror_path())
+        except OSError:
+            # Peilin epäonnistuminen ei saa keskeyttää peliä.
+            pass
+
+    def _new_game(self, destination: str = "") -> None:
         for child in self.root.winfo_children():
             child.destroy()
-        NewGameWizard(self.root, self._open_game)
+        NewGameWizard(
+            self.root,
+            self._open_game,
+            destination=destination or self._local_destination(),
+        )
+
+    def _install_remote_game(self, game: GameState, _path: Path) -> None:
+        """Lähetä velhon luoma peli palvelimelle ja jatka siitä."""
+
+        service = self.service
+        if not isinstance(service, RemoteGameService):
+            return
+        try:
+            service.create_game(game)
+            installed = service.snapshot()
+        except CommandError as error:
+            messagebox.showerror(
+                "Could not create the game on the server",
+                str(error),
+                parent=self.root,
+            )
+            return
+        self.game = installed
+        self.save_path = None
+        self._mirror_state(installed)
+        self._build_main_view()
 
     def _open_game(self, game: GameState, path: Path) -> None:
         self.save_path = path
@@ -2422,6 +2597,7 @@ class MegaEmpiresApp:
                 or snapshot.state_version != self.game.state_version
             ):
                 self.game = snapshot
+                self._mirror_state(snapshot)
                 self._refresh_all()
         self._poll_job = self.root.after(delay, self._poll)
 
@@ -2656,12 +2832,21 @@ class MegaEmpiresApp:
 
     def _confirm_new_game(self) -> None:
         if isinstance(self.service, RemoteGameService):
-            messagebox.showinfo(
-                "Not available in server mode",
-                "The game lives on the server and cannot be replaced from "
-                "here yet. Creating a game over HTTP is not implemented.",
+            if messagebox.askyesno(
+                "Replace the game on the server?",
+                "This replaces the game on the server for everyone, including "
+                "any phones already connected. Continue?",
+                icon="warning",
                 parent=self.root,
-            )
+            ):
+                for child in self.root.winfo_children():
+                    child.destroy()
+                NewGameWizard(
+                    self.root,
+                    self._install_remote_game,
+                    destination=self._remote_destination(),
+                    ask_name=False,
+                )
             return
         if messagebox.askyesno(
             "Start a new game?",
@@ -2709,8 +2894,8 @@ class MegaEmpiresApp:
         save_name = self.save_path.stem if self.save_path is not None else ""
         self.status_label.configure(
             text=(
-                f"{save_name}  •  "
-                f"{GAME_MODE_LABELS[self.game.game_mode]}  •  "
+                (f"{save_name}  •  " if save_name else "")
+                + f"{GAME_MODE_LABELS[self.game.game_mode]}  •  "
                 f"{self.game.player_count} players  •  "
                 f"{self.game.ast_variant.title()} A.S.T.  •  "
                 f"Turn {self.game.round_number}  •  "

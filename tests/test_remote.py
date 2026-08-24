@@ -11,6 +11,7 @@ import socket
 import tempfile
 import threading
 import time
+import urllib.request
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,7 +24,7 @@ import uvicorn
 
 import main
 from mega_empires.models import GameState, PlayerState
-from mega_empires.remote import RemoteGameService
+from mega_empires.remote import USER_AGENT, RemoteGameService
 from mega_empires.service import (
     LocalGameService,
     RuleViolation,
@@ -199,6 +200,27 @@ class RemoteServiceTests(unittest.TestCase):
 
         with self.assertRaises(ServiceUnavailable):
             dead.snapshot()
+
+    def test_requests_identify_themselves(self) -> None:
+        """Cloudflare torjuu urllibin oletus-User-Agentin 403:lla.
+
+        Testipalvelin ei ole Cloudflaren takana, joten tämä ei paljastuisi
+        muuten kuin oikeaa palvelinta vasten — siksi otsake tarkistetaan
+        suoraan pyynnöstä.
+        """
+
+        captured = {}
+        real = urllib.request.urlopen
+
+        def spy(request, *args, **kwargs):
+            captured["ua"] = request.get_header("User-agent")
+            return real(request, *args, **kwargs)
+
+        with mock.patch.object(urllib.request, "urlopen", spy):
+            self.remote.snapshot()
+
+        self.assertEqual(captured["ua"], USER_AGENT)
+        self.assertNotIn("Python-urllib", captured["ua"])
 
     # -- sopimuksen yhdenmukaisuus ------------------------------------------
 

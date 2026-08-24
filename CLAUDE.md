@@ -39,8 +39,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 140 tests
-python3 -m unittest discover -v             # 108 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 155 tests
+python3 -m unittest discover -v             # 123 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
@@ -78,7 +78,8 @@ the backend conversion tractable.
 | [mega_empires/credits.py](mega_empires/credits.py) | Colour credits, row-chain discounts, effective Advance purchase price |
 | [mega_empires/sequence.py](mega_empires/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
 | [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
-| [mega_empires/remote.py](mega_empires/remote.py) | `RemoteGameService`: the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
+| [mega_empires/config.py](mega_empires/config.py) | Server URL and token from `~/.config/mega-empires/config.json`, env vars overriding per field |
+| [mega_empires/remote.py](mega_empires/remote.py) | `RemoteGameService` — the app in **remote mode**, i.e. a client of the box (the app is never itself a server): the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
 | [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
 | [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
 | [main.py](main.py) | FastAPI HTTP layer over `GameService`. Thin by design: routes, auth, error mapping, SSE fan-out. **No game logic here** |
@@ -228,12 +229,12 @@ pull `/state` with their token. This also makes "every reconnect pulls a fresh
 snapshot" fall out for free. **Do not put game data on that stream.**
 
 Done also: [mega_empires/remote.py](mega_empires/remote.py) and the desktop app's
-server mode. Set `MEGA_EMPIRES_SERVER` (and `MEGA_EMPIRES_TOKEN`) and `ui.py`
+remote mode. Set `MEGA_EMPIRES_SERVER` (and `MEGA_EMPIRES_TOKEN`) and `ui.py`
 connects to the box instead of opening a local save; unset, it behaves exactly as
 before. `tests/test_remote.py` drives `RemoteGameService` against a **real uvicorn
 running the real app**, so `remote.py` and `main.py` cannot drift apart unnoticed.
 
-Rules that fall out of server mode and must not be undone:
+Rules that fall out of remote mode and must not be undone:
 
 - **`remote.py` is stdlib-only.** httpx exists in the venv but the desktop app
   must start under bare `python3`; that is what makes the offline fallback real.
@@ -247,15 +248,44 @@ Rules that fall out of server mode and must not be undone:
 - **Never auto-retry a `VersionConflict`.** Retrying with the old value overwrites
   whatever the other device just wrote. `_run_command()` refreshes the view and
   tells the user instead.
+- **Requests must send a `User-Agent`.** Cloudflare rejects urllib's default
+  `Python-urllib/3.x` with a 403 (error 1010, "browser signature banned"), so every
+  call would fail in production. `remote.py` sends an honest identifier — no browser
+  spoofing needed, Cloudflare only bans that one signature. **The test suite cannot
+  catch this class of bug**: tests talk to `127.0.0.1` and never traverse Cloudflare,
+  so anything the edge does — UA filtering, rate limits, buffering — only shows up
+  against the real host.
 - **Census input is debounced** (`CENSUS_DEBOUNCE_MS`); without it each keystroke
   was one request, and typing "45" briefly published 4 to every other client.
 
-Next: the player PWA — cities and census first, advances as a separate decision.
+**Remote mode is the default, local is the fallback.** `load_server_config()`
+returns a server and the app connects to it; no config means local, so a fresh
+checkout and the test suite still run offline.
 
-**Known gaps:** `get_service()` loads the save once and caches it, so a game
-replaced on disk needs a service restart. There is no way to create a game over
-HTTP, so "New Game" is disabled in server mode and a game must be seeded onto the
-box as `/var/lib/mega-empires/nykyinen_peli.json`.
+- **The laptop mirrors server state to a local save** (`palvelinpeli.json`) each
+  time `state_version` moves. Without it the offline fallback would be useless —
+  the game is on the box, so falling back would start from nothing mid-game. On
+  fallback the laptop's copy simply becomes the truth; nothing merges back.
+- **The fallback preselects the mirror, it never opens it automatically.** The
+  saved-game list is always shown so the user can pick a different save or start
+  fresh — the program does not decide which game is being played. The banner
+  names the reason the server was unavailable.
+- **A 503 "no saved game" is not an outage.** The server is reachable but empty,
+  so the right response is the new-game wizard, not the offline prompt.
+- **`POST /game`** installs a wizard-built `GameState` and swaps the cached
+  service, so changing games needs no SSH and no restart. Version counters are
+  reset on install so a new game cannot inherit the old one's.
+
+Next: the player PWA. Blocked on authorization — there is currently **one shared
+token with full authority**, so handing it to phones would let every player edit
+every row, which is worse than the single-operator status quo. Per-civilization
+tokens and field-level scoping come first, then a `/join` claim flow (a typed URL
+behind a spoken game code — QR would need a non-stdlib dependency), then the page
+itself: cities and census, own row only.
+
+**Known gap:** `get_service()` caches the loaded save, so a game replaced *on disk*
+still needs a restart — `POST /game` is the supported way to change games and does
+not.
 
 **Not yet wired:** commands accept `expected_version` but `ui.py` does not pass it,
 because the desktop app is currently the only writer. Pass it once there is more
