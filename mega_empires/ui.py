@@ -27,6 +27,7 @@ from .data import (
 from .credits import advance_price, color_credits, flexible_credit_entitlement
 from .models import GameState, PlayerState
 from .scoring import calculate_score, players_in_ast_order, visible_rankings
+from .service import CommandError, LocalGameService, RuleViolation
 from .sequence import (
     PHASES,
     PHASE_BY_NUMBER,
@@ -625,7 +626,7 @@ class AdvanceDialog(tk.Toplevel):
         parent: tk.Widget,
         player: PlayerState,
         game: GameState,
-        on_save: Callable[[], None],
+        on_save: Callable[..., bool],
     ) -> None:
         super().__init__(parent)
         self.player = player
@@ -1010,10 +1011,8 @@ class AdvanceDialog(tk.Toplevel):
                 parent=self,
             )
             return
-        self.player.advances = selected_advances
-        self.player.flexible_credits = flexible
-        self.player.normalize()
-        self.on_save()
+        if not self.on_save(selected_advances, flexible):
+            return
         self.grab_release()
         self.destroy()
 
@@ -1024,7 +1023,7 @@ class PlayerDialog(tk.Toplevel):
         parent: tk.Widget,
         player: PlayerState,
         game: GameState,
-        on_save: Callable[[], None],
+        on_save: Callable[..., bool],
     ) -> None:
         super().__init__(parent)
         self.player = player
@@ -1139,57 +1138,17 @@ class PlayerDialog(tk.Toplevel):
             )
             return
 
-        requested_bonus = self.ast_bonus.get()
-        other_bonus_players = [
-            other
-            for other in self.game.players
-            if other is not self.player and other.ast_bonus
-        ]
-        if (
-            requested_bonus
-            and self.game.player_count <= 11
-            and other_bonus_players
+        # A.S.T.-bonuksen säännöt tarkistaa service.validate_ast_bonus(); tässä
+        # ollut kopio poistettiin, jotta sääntö ei voi erkaantua ytimestä.
+        if not self.on_save(
+            nickname,
+            self.block.get(),
+            cities,
+            ast_step,
+            census,
+            bool(self.ast_bonus.get()),
         ):
-            messagebox.showerror(
-                "Cannot award A.S.T. bonus",
-                "The A.S.T. end-game bonus can be confirmed for only one "
-                "player in this game.",
-                parent=self,
-            )
             return
-        if (
-            requested_bonus
-            and self.game.player_count >= 12
-            and len(other_bonus_players) >= 2
-        ):
-            messagebox.showerror(
-                "Cannot award A.S.T. bonus",
-                "The bonus can be confirmed for no more than two players "
-                "in a combined game.",
-                parent=self,
-            )
-            return
-        if (
-            requested_bonus
-            and self.game.player_count >= 12
-            and len(other_bonus_players) == 1
-            and other_bonus_players[0].block == self.block.get()
-        ):
-            messagebox.showerror(
-                "Cannot award A.S.T. bonus",
-                "Two bonus recipients must belong to different trade blocks.",
-                parent=self,
-            )
-            return
-
-        self.player.nickname = nickname
-        self.player.block = self.block.get()
-        self.player.cities = cities
-        self.player.ast_step = ast_step
-        self.player.census = census
-        self.player.ast_bonus = requested_bonus
-        self.player.normalize()
-        self.on_save()
         self.grab_release()
         self.destroy()
 
@@ -2337,7 +2296,10 @@ class MajorCalamityDialog(tk.Toplevel):
 class MegaEmpiresApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        # self.game on piirtovälimuisti: kopio siitä mitä palvelu viimeksi
+        # kertoi, ei toinen totuus. Kaikki muutokset kulkevat self.servicen läpi.
         self.game: GameState | None = None
+        self.service: LocalGameService | None = None
         self.save_path: Path | None = None
         root.title("Mega Empires – Score Tracker")
         root.configure(background=BACKGROUND)
@@ -2375,17 +2337,137 @@ class MegaEmpiresApp:
         NewGameWizard(self.root, self._open_game)
 
     def _open_game(self, game: GameState, path: Path) -> None:
-        self.game = game
         self.save_path = path
-        self._save()
+        save_game(game, path)
+        self.service = LocalGameService(game, save_path=path)
+        self._refresh_state()
         self._build_main_view()
 
-    def _save(self) -> None:
-        if self.game is not None and self.save_path is not None:
-            save_game(self.game, self.save_path)
+    def _refresh_state(self) -> None:
+        """Hae tuore tilannekuva palvelulta. Palvelu tallentaa itse."""
+
+        if self.service is not None:
+            self.game = self.service.snapshot()
+
+    def _player(self, civilization: str) -> PlayerState | None:
+        """Etsi pelaaja tuoreesta tilannekuvasta.
+
+        Painikkeiden lambdat sulkevat sisäänsä piirtohetken pelaajaolion, joka on
+        kopio. Arvo luetaan siksi aina nimen perusteella nykyisestä
+        tilannekuvasta eikä sulkeuman kopiosta.
+        """
+
+        if self.game is None:
+            return None
+        for player in self.game.players:
+            if player.civilization == civilization:
+                return player
+        return None
+
+    def _run_command(
+        self,
+        command: Callable[[], object],
+        parent: tk.Misc | None = None,
+    ) -> bool:
+        """Suorita palvelun komento ja näytä hylkäys käyttäjälle.
+
+        Palauttaa True jos komento hyväksyttiin. Dialogit sulkeutuvat vain
+        silloin, jotta hylätty tallennus ei katoa näkyvistä.
+
+        expected_versionia ei vielä välitetä: työpöytäsovellus on toistaiseksi
+        ainoa kirjoittaja. Se kytketään kun RemoteGameService ja puhelimet
+        tulevat mukaan.
+        """
+
+        try:
+            command()
+        except RuleViolation as error:
+            messagebox.showerror(
+                "Cannot save change",
+                str(error),
+                parent=parent or self.root,
+            )
+            return False
+        except CommandError as error:
+            messagebox.showerror(
+                "Command failed",
+                str(error),
+                parent=parent or self.root,
+            )
+            return False
+        self._refresh_state()
+        return True
+
+    def _open_advance_dialog(self, player: PlayerState) -> None:
+        if self.game is None:
+            return
+        dialog = AdvanceDialog(self.root, player, self.game, lambda *a: False)
+        dialog.on_save = lambda advances, flexible: self._save_advances(
+            player, advances, flexible, dialog
+        )
+
+    def _open_player_dialog(self, player: PlayerState) -> None:
+        if self.game is None:
+            return
+        dialog = PlayerDialog(self.root, player, self.game, lambda *a: False)
+        dialog.on_save = lambda *values: self._save_player_details(
+            player, *values, parent=dialog
+        )
+
+    def _save_advances(
+        self,
+        player: PlayerState,
+        advances: list[str],
+        flexible_credits: dict[str, int],
+        parent: tk.Misc,
+    ) -> bool:
+        if self.service is None:
+            return False
+        accepted = self._run_command(
+            lambda: self.service.set_advances(
+                player.civilization,
+                advances,
+                flexible_credits,
+                actor="laptop",
+            ),
+            parent,
+        )
+        if accepted:
+            self._refresh_all()
+        return accepted
+
+    def _save_player_details(
+        self,
+        player: PlayerState,
+        nickname: str,
+        block: str,
+        cities: int,
+        ast_step: int,
+        census: int,
+        ast_bonus: bool,
+        parent: tk.Misc,
+    ) -> bool:
+        if self.service is None:
+            return False
+        accepted = self._run_command(
+            lambda: self.service.set_player_details(
+                player.civilization,
+                nickname=nickname,
+                block=block,
+                cities=cities,
+                ast_step=ast_step,
+                census=census,
+                ast_bonus=ast_bonus,
+                actor="laptop",
+            ),
+            parent,
+        )
+        if accepted:
+            self._refresh_all()
+        return accepted
 
     def _save_and_refresh(self) -> None:
-        self._save()
+        self._refresh_state()
         self._refresh_all()
 
     def _build_main_view(self) -> None:
@@ -2497,12 +2579,16 @@ class MegaEmpiresApp:
         self.turn_label.configure(text=str(self.game.round_number))
 
     def _change_round(self, amount: int) -> None:
-        if self.game is None:
+        if self.game is None or self.service is None:
             return
-        self.game.round_number = max(1, self.game.round_number + amount)
-        self._save()
-        self._refresh_header()
-        self._refresh_sequence()
+        target = max(1, self.game.round_number + amount)
+        if self._run_command(
+            lambda: self.service.set_turn(
+                target, self.game.current_phase, actor="laptop"
+            )
+        ):
+            self._refresh_header()
+            self._refresh_sequence()
 
     def _on_tab_changed(self, _event: object | None = None) -> None:
         if self.game is None or not hasattr(self, "sequence_tab"):
@@ -2511,12 +2597,28 @@ class MegaEmpiresApp:
             self._refresh_sequence()
 
     def _change_cities(self, player: PlayerState, amount: int) -> None:
-        player.cities = max(0, min(9, player.cities + amount))
-        self._save_and_refresh()
+        current = self._player(player.civilization)
+        if current is None or self.service is None:
+            return
+        target = max(0, min(9, current.cities + amount))
+        if self._run_command(
+            lambda: self.service.set_cities(
+                current.civilization, target, actor="laptop"
+            )
+        ):
+            self._refresh_all()
 
     def _change_ast(self, player: PlayerState, amount: int) -> None:
-        player.ast_step = max(0, min(AST_MAX_STEP, player.ast_step + amount))
-        self._save_and_refresh()
+        current = self._player(player.civilization)
+        if current is None or self.service is None:
+            return
+        target = max(0, min(AST_MAX_STEP, current.ast_step + amount))
+        if self._run_command(
+            lambda: self.service.set_ast_step(
+                current.civilization, target, actor="laptop"
+            )
+        ):
+            self._refresh_all()
 
     def _refresh_summary(self) -> None:
         if self.game is None:
@@ -2651,23 +2753,13 @@ class MegaEmpiresApp:
             actions,
             text="Advances",
             width=8,
-            command=lambda: AdvanceDialog(
-                self.root,
-                player,
-                self.game,
-                self._save_and_refresh,
-            ),
+            command=lambda: self._open_advance_dialog(player),
         ).pack(pady=(0, 3))
         ttk.Button(
             actions,
             text="Details",
             width=8,
-            command=lambda: PlayerDialog(
-                self.root,
-                player,
-                self.game,
-                self._save_and_refresh,
-            ),
+            command=lambda: self._open_player_dialog(player),
         ).pack()
 
     def _counter(
@@ -2780,9 +2872,14 @@ class MegaEmpiresApp:
         if not text:
             return
         census = int(text)
-        if census != player.census:
-            player.census = census
-            self._save()
+        current = self._player(player.civilization)
+        if self.service is None or current is None or census == current.census:
+            return
+        self._run_command(
+            lambda: self.service.set_census(
+                current.civilization, census, actor="laptop"
+            )
+        )
 
     def _refresh_sequence(self) -> None:
         if self.game is None:
@@ -3050,23 +3147,29 @@ class MegaEmpiresApp:
             ).pack(fill="x")
 
     def _select_phase(self, phase_number: int) -> None:
-        if self.game is None:
+        if self.game is None or self.service is None:
             return
-        self.game.current_phase = max(1, min(len(PHASES), phase_number))
-        self._save()
-        self._refresh_sequence()
+        target = max(1, min(len(PHASES), phase_number))
+        if self._run_command(
+            lambda: self.service.set_turn(
+                self.game.round_number, target, actor="laptop"
+            )
+        ):
+            self._refresh_sequence()
 
     def _change_phase(self, direction: int) -> None:
-        if self.game is None:
+        if self.game is None or self.service is None:
             return
-        self.game.round_number, self.game.current_phase = adjacent_phase(
+        round_number, phase = adjacent_phase(
             self.game.round_number,
             self.game.current_phase,
             direction,
         )
-        self._save()
-        self._refresh_header()
-        self._refresh_sequence()
+        if self._run_command(
+            lambda: self.service.set_turn(round_number, phase, actor="laptop")
+        ):
+            self._refresh_header()
+            self._refresh_sequence()
 
     def _render_major_calamities(self, parent: tk.Frame) -> None:
         tk.Label(
@@ -3752,8 +3855,14 @@ class MegaEmpiresApp:
                 )
 
     def _set_ast(self, player: PlayerState, step: int) -> None:
-        player.ast_step = step
-        self._save_and_refresh()
+        if self.service is None:
+            return
+        if self._run_command(
+            lambda: self.service.set_ast_step(
+                player.civilization, step, actor="laptop"
+            )
+        ):
+            self._refresh_all()
 
 
 def run() -> None:

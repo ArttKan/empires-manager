@@ -111,7 +111,7 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(loaded.ast_variant, "BASIC")
             self.assertEqual(loaded.round_number, 4)
             self.assertEqual(loaded.current_phase, 10)
-            self.assertEqual(raw["version"], 4)
+            self.assertEqual(raw["version"], 5)
 
     def test_version_one_save_is_migrated_without_losing_players(self) -> None:
         old_data = {
@@ -131,10 +131,47 @@ class StorageTests(unittest.TestCase):
             "version": 1,
         }
         game = GameState.from_dict(old_data)
-        self.assertEqual(game.version, 4)
+        self.assertEqual(game.version, 5)
         self.assertEqual(game.game_mode, "WEST")
         self.assertEqual(game.players[0].block, "EAST")
         self.assertEqual(game.players[1].block, "WEST")
+
+
+class SaveFormatMigrationTests(unittest.TestCase):
+    def test_version_four_save_gains_zero_version_counters(self) -> None:
+        """Versiolaskurit puuttuvat vanhoista tallennuksista ja alkavat nollasta."""
+
+        raw = {
+            "version": 4,
+            "player_count": 1,
+            "players": [
+                {
+                    "civilization": "Hellas",
+                    "nickname": "Matti",
+                    "block": "WEST",
+                    "cities": 4,
+                }
+            ],
+            "game_mode": "WEST",
+        }
+        game = GameState.from_dict(raw)
+
+        self.assertEqual(game.version, 5)
+        self.assertEqual(game.state_version, 0)
+        self.assertEqual(game.players[0].version, 0)
+        self.assertEqual(game.players[0].cities, 4)
+
+    def test_version_counters_survive_a_round_trip(self) -> None:
+        game = GameState(
+            player_count=1,
+            players=[PlayerState("Hellas", "Matti", "WEST", version=7)],
+            game_mode="WEST",
+            state_version=42,
+        )
+        restored = GameState.from_dict(json.loads(json.dumps(game.to_dict())))
+
+        self.assertEqual(restored.state_version, 42)
+        self.assertEqual(restored.players[0].version, 7)
 
 
 if __name__ == "__main__":

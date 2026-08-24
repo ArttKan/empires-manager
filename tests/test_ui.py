@@ -9,6 +9,7 @@ if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
 import tkinter as tk
 
 from mega_empires.models import GameState, PlayerState
+from mega_empires.service import LocalGameService
 from mega_empires.sequence import PHASE_BY_NUMBER
 from mega_empires.ui import (
     CALAMITY_DIALOG_SPECS,
@@ -276,21 +277,48 @@ class ScoreboardUiTests(unittest.TestCase):
                 values.append(value)
         return values
 
-    def test_census_entry_commits_directly_without_refresh(self) -> None:
+    def test_census_entry_issues_one_command_and_skips_no_op_edits(self) -> None:
+        """Census-kenttä lähettää komennon eikä muuta pelaajaoliota itse."""
+
         interpreter = tk.Tcl()
         value = tk.StringVar(master=interpreter, value="37")
-        player = PlayerState("Minoa", "Mia", "WEST", census=12)
+        game = GameState(
+            player_count=1,
+            players=[PlayerState("Minoa", "Mia", "WEST", census=12)],
+            game_mode="WEST",
+        )
         app = object.__new__(MegaEmpiresApp)
-        save_calls: list[bool] = []
-        app._save = lambda: save_calls.append(True)
+        app.service = LocalGameService(game)
+        app._refresh_state()
 
-        app._commit_census(player, value)
+        app._commit_census(app.game.players[0], value)
 
-        self.assertEqual(player.census, 37)
-        self.assertEqual(len(save_calls), 1)
+        self.assertEqual(app.service.snapshot().players[0].census, 37)
+        self.assertEqual(app.service.snapshot().state_version, 1)
 
-        app._commit_census(player, value)
-        self.assertEqual(len(save_calls), 1)
+        # Sama arvo uudelleen ei saa nostaa versiota eikä kirjata lokiin.
+        app._commit_census(app.game.players[0], value)
+        self.assertEqual(app.service.snapshot().state_version, 1)
+
+    def test_counter_reads_the_current_value_not_the_captured_copy(self) -> None:
+        """Painikkeen sulkeuma pitää piirtohetken kopiota; komento ei saa käyttää sitä."""
+
+        game = GameState(
+            player_count=1,
+            players=[PlayerState("Minoa", "Mia", "WEST", cities=2)],
+            game_mode="WEST",
+        )
+        app = object.__new__(MegaEmpiresApp)
+        app.service = LocalGameService(game)
+        app._refresh_state()
+        app._refresh_all = lambda: None
+        stale = app.game.players[0]
+
+        app._change_cities(stale, 1)
+        app._change_cities(stale, 1)
+
+        # Vanhentuneesta kopiosta laskien tulos olisi 3, tuoreesta 4.
+        self.assertEqual(app.service.snapshot().players[0].cities, 4)
 
 
 if __name__ == "__main__":

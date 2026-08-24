@@ -20,6 +20,10 @@ class PlayerState:
     ast_bonus: bool = False
     census: int = 0
     flexible_credits: dict[str, int] = field(default_factory=dict)
+    # Kasvaa jokaisella hyväksytyllä komennolla. Asiakas lähettää tuntemansa
+    # arvon mukana, jotta vanhentunut kirjoitus voidaan hylätä sen sijaan että
+    # se yliajaisi toisen pelaajan juuri tekemän muutoksen.
+    version: int = 0
 
     @property
     def display_name(self) -> str:
@@ -38,6 +42,7 @@ class PlayerState:
         self.census = max(0, min(55, int(self.census)))
         self.advances = list(dict.fromkeys(self.advances))
         self.ast_bonus = bool(self.ast_bonus)
+        self.version = max(0, int(self.version))
         self.flexible_credits = {
             group: max(0, int(self.flexible_credits.get(group, 0)))
             for group in ADVANCE_GROUPS
@@ -54,6 +59,7 @@ class PlayerState:
             advances=[str(value) for value in data.get("advances", [])],
             ast_bonus=bool(data.get("ast_bonus", False)),
             census=int(data.get("census", 0)),
+            version=int(data.get("version", 0)),
             flexible_credits={
                 str(group): int(value)
                 for group, value in data.get("flexible_credits", {}).items()
@@ -71,7 +77,11 @@ class GameState:
     ast_variant: str = "BASIC"
     round_number: int = 1
     current_phase: int = 1
-    version: int = 4
+    # HUOM: `version` on tallennusmuodon versio, ei pelitilan versio.
+    # `state_version` on maailmanlaajuinen laskuri, jolla asiakas tunnistaa
+    # onko sen tuntema tilannekuva vanhentunut.
+    version: int = 5
+    state_version: int = 0
     saved_at: str = ""
 
     def normalize(self) -> None:
@@ -84,6 +94,7 @@ class GameState:
             self.ast_variant = "BASIC"
         self.round_number = max(1, int(self.round_number))
         self.current_phase = max(1, min(13, int(self.current_phase)))
+        self.state_version = max(0, int(self.state_version))
         for player in self.players:
             player.normalize()
 
@@ -111,7 +122,8 @@ class GameState:
             ast_variant=str(data.get("ast_variant", "BASIC")),
             round_number=int(data.get("round_number", 1)),
             current_phase=int(data.get("current_phase", 1)),
-            version=4,
+            version=5,
+            state_version=int(data.get("state_version", 0)),
             saved_at=str(data.get("saved_at", "")),
         )
         if source_version < 2:

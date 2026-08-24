@@ -1,5 +1,5 @@
 __pycache__/
 *.py[cod]
 tallennukset/*.json
+tallennukset/*.jsonl
 tallennukset/*.tmp
-

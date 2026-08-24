@@ -39,7 +39,7 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                          # run the app (needs a display)
-python3 -m unittest discover -v         # run all 65 tests
+python3 -m unittest discover -v         # run all 95 tests
 python3 -m unittest tests.test_scoring  # run one module
 ```
 
@@ -69,8 +69,9 @@ the backend conversion tractable.
 | [mega_empires/credits.py](mega_empires/credits.py) | Colour credits, row-chain discounts, effective Advance purchase price |
 | [mega_empires/sequence.py](mega_empires/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
 | [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
+| [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
 | [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
-| [mega_empires/ui.py](mega_empires/ui.py) | Tkinter app: new-game wizard, tabs (Scoreboard / A.S.T. / Sequence of Play), Advances, Details and calamity dialogs. By far the largest module |
+| [mega_empires/ui.py](mega_empires/ui.py) | Tkinter app, now a **client of `GameService`**: new-game wizard, tabs (Scoreboard / A.S.T. / Sequence of Play), Advances, Details and calamity dialogs. By far the largest module |
 
 ## Domain rules that are easy to get wrong
 
@@ -80,9 +81,8 @@ the backend conversion tractable.
 - **A.S.T. bonus is conditional.** It is confirmed manually in the Details dialog
   during the final A.S.T. phase, never inferred from a Late Iron Age position.
   12+ players: at most two recipients, and they must be in different trade blocks.
-  **This validation currently lives in `PlayerDialog._save` in `ui.py`** — it is
-  the one piece of real game logic stranded in the UI layer, and Phase B moves it
-  into the core.
+  This lives in `service.validate_ast_bonus()` only; the duplicate that was in
+  `PlayerDialog._save` has been deleted. Do not reintroduce rule checks in dialogs.
 - **Era boundaries are per civilization and per scenario.** Read them through
   `basic_ast_era_starts(civilization, player_count, game_mode)`, never straight
   from `BASIC_AST_ERA_STARTS` — the 3-player East game shifts Parthia's MBA start.
@@ -110,12 +110,23 @@ the backend conversion tractable.
 
 ## Working conventions
 
-- Every mutation autosaves immediately: mutate the `PlayerState`, then call
-  `_save_and_refresh()` (or `_save()` when the widget already shows the new value).
+- **The UI never mutates state.** It calls a `GameService` command through
+  `_run_command()`, which surfaces `RuleViolation` as a dialog and returns False so
+  dialogs stay open on rejection. The service persists; there is no `_save()`.
+- `self.game` in `ui.py` is a **render cache** — a snapshot copy, refreshed by
+  `_refresh_state()`. Button lambdas capture stale copies, so commands look the
+  current value up with `_player(civilization)` rather than trusting the closure.
 - Call `normalize()` after editing state from outside the models; it clamps
   cities, A.S.T. step 0–15, census, and dedupes advances.
-- The save format is `version: 4`; `GameState.from_dict` migrates older saves.
+- The save format is `version: 5`; `GameState.from_dict` migrates older saves.
   Bump the version and add a migration branch if the schema changes.
+- **`GameState.version` is the save format; `state_version` is the global command
+  counter.** Do not confuse them. `PlayerState.version` is the per-player counter
+  used for write-conflict detection.
+- **Mutate state only through `GameService`.** Commands take absolute values plus
+  an `expected_version`, never deltas — two concurrent `+1`s would both succeed.
+  Commands return copies, never live references, because `RemoteGameService` will
+  not be able to return a live object.
 - **Never hardcode a save path.** `storage.data_directory()` resolves
   `MEGA_EMPIRES_DATA_DIR` at call time, falling back to the repo's `tallennukset/`.
   Resolution must stay at call time so systemd can set it before start.
@@ -158,17 +169,30 @@ through an ordinary deploy. The `ECHO_TOKEN` lives in
 drops to the service user. `EnvironmentFile` is deliberately mandatory: a missing
 file stops the service rather than letting it serve wrongly.
 
-This replaces an earlier arrangement where the box's copy carried the token inline
+This replaced an earlier arrangement where the box's copy carried the token inline
 under `git update-index --skip-worktree`, which silently prevented unit changes
-from ever reaching the server. **The one-time migration off that is in
-[deploy/README.md](deploy/README.md); until it has been run on the box, the old
-skip-worktree behaviour still applies there.**
+from ever reaching the server. That migration has been completed on the box, so
+unit changes now deploy normally — do not reintroduce a secret into the template.
 
-**Phase B, not yet started:** extract a `GameService` that owns the `GameState`
-and exposes validated commands instead of letting callers mutate dataclasses;
-per-player version counters; append-only JSONL command log. Move the A.S.T. bonus
-validation out of `ui.py`. Wire one command end to end before filling in the rest.
-Keep the Tkinter app working against `GameService` as a correctness check.
+**Phase B, in progress.** The plan: one game state on the box; the laptop runs the
+full Tkinter app as a *client* of it (main hub, full authority); phones are narrow
+clients for cities, census and possibly advances, scoped to their own civilization.
+The laptop holds a render cache, never a second authoritative state — nothing ever
+merges. Its offline fallback is "take over locally and become the new truth", not
+two-way sync.
+
+Done: `service.py` with `LocalGameService` (commands, version counters, JSONL
+command log, A.S.T. bonus validation), and `ui.py` fully wired to it — all eight
+mutation sites plus both dialogs now issue commands instead of mutating dataclasses.
+
+Next: the HTTP layer on the box replacing the Phase A `/echo` placeholder, then
+`RemoteGameService` over HTTP with the Tkinter app polling `/state` on a
+`root.after()` timer — no SSE client in Tkinter, to keep threading out of the
+desktop app. Phones come last.
+
+**Not yet wired:** commands accept `expected_version` but `ui.py` does not pass it,
+because the desktop app is currently the only writer. Pass it once there is more
+than one.
 
 **Phase C, not designed:** browser TV display and a player PWA. Mobile browsers
 drop SSE when the screen locks, so every client reconnect must pull a full fresh
