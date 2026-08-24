@@ -39,7 +39,7 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                          # run the app (needs a display)
-python3 -m unittest discover -v         # run all 95 tests
+python3 -m unittest discover -v         # run all 102 tests
 python3 -m unittest tests.test_scoring  # run one module
 ```
 
@@ -99,7 +99,8 @@ the backend conversion tractable.
   Use `PlayerState.display_name` everywhere, including generated player orders.
 - **Scoreboard rows stay in fixed A.S.T.-ranking order** (`players_in_ast_order`)
   so rows never jump around mid-game; the large badge shows the current rank from
-  `visible_rankings`. Do not re-sort rows by score.
+  `visible_rankings`. Do not re-sort rows by score. That stability is what allows
+  the rows to be built once and updated in place — see below.
 - **Tie-breaks** follow the official list only as far as stored data allows.
   Credit-token criteria (steps 4–5) are not tracked, so a tie that would need them
   must be shown as unresolved, never claimed as decided.
@@ -130,6 +131,20 @@ the backend conversion tractable.
 - **Never hardcode a save path.** `storage.data_directory()` resolves
   `MEGA_EMPIRES_DATA_DIR` at call time, falling back to the repo's `tallennukset/`.
   Resolution must stay at call time so systemd can set it before start.
+- **Never rebuild the scoreboard by destroying widgets.** `_refresh_summary()`
+  builds rows once into `self._row_widgets` and afterwards only reconfigures the
+  labels whose text actually changed, comparing against a Python-side cache so an
+  unchanged row costs zero Tcl calls. Destroy-and-rebuild cost ~490 widget
+  create/destroy operations and **1401 ms per click at 18 players**; in-place
+  update is 0.5 ms. Rows are rebuilt only when the set of civilizations changes.
+- **Only the visible tab is redrawn.** `_refresh_all()` puts the others in
+  `self._pending_tabs`; `_on_tab_changed` draws them when shown. A.S.T. and
+  Sequence still rebuild wholesale (~34 ms and ~86 ms), which is fine when paid
+  only on the tab you are looking at.
+- **Row callbacks must not trust their closure.** Rows outlive many state changes,
+  so the `player` captured at build time is a stale copy. Look the current value up
+  with `_player(civilization)` — this applies to counters, the census field, and
+  both dialog openers.
 - Add tests to the matching `tests/test_*.py` for any logic change. UI tests
   construct objects via `object.__new__(MegaEmpiresApp)` and a bare `tk.Tcl()`
   interpreter to avoid opening a window — follow that pattern.

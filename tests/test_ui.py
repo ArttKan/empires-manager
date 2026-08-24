@@ -321,5 +321,131 @@ class ScoreboardUiTests(unittest.TestCase):
         self.assertEqual(app.service.snapshot().players[0].cities, 4)
 
 
+class ScoreboardRowUpdateTests(unittest.TestCase):
+    """Rivit rakennetaan kerran ja päivitetään paikallaan.
+
+    Aiemmin jokainen muutos tuhosi ja loi lähes 500 widgetiä, mikä maksoi
+    18 pelaajalla yli sekunnin. Nämä testit estävät paluun siihen.
+    """
+
+    def setUp(self) -> None:
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as error:  # ei näyttöä käytettävissä
+            raise unittest.SkipTest(f"no display: {error}")
+        self.root.withdraw()
+        game = GameState(
+            player_count=3,
+            players=[
+                PlayerState("Minoa", "A", "WEST"),
+                PlayerState("Hatti", "B", "WEST"),
+                PlayerState("Hellas", "C", "WEST"),
+            ],
+            game_mode="WEST",
+        )
+        self.app = object.__new__(MegaEmpiresApp)
+        self.app.root = self.root
+        self.app.game = None
+        self.app.service = None
+        self.app.save_path = None
+        self.app._open_game(game, None)
+        self.root.update_idletasks()
+
+    def tearDown(self) -> None:
+        self.root.destroy()
+
+    def _text(self, civilization: str, key: str) -> str:
+        return self.app._row_widgets[civilization][key].cget("text")
+
+    def test_value_change_does_not_recreate_widgets(self) -> None:
+        before = {
+            civ: id(widgets["badge"])
+            for civ, widgets in self.app._row_widgets.items()
+        }
+
+        self.app._change_cities(self.app._player("Hellas"), 1)
+        self.root.update_idletasks()
+
+        after = {
+            civ: id(widgets["badge"])
+            for civ, widgets in self.app._row_widgets.items()
+        }
+        self.assertEqual(before, after)
+
+    def test_rank_badges_follow_score_changes(self) -> None:
+        self.app._change_cities(self.app._player("Hellas"), 4)
+        self.root.update_idletasks()
+
+        self.assertEqual(self._text("Hellas", "badge"), "1")
+        self.assertEqual(self._text("Hellas", "total"), "4")
+        self.assertEqual(self._text("Minoa", "badge"), "2")
+
+    def test_subtitle_tracks_advances_and_bonus(self) -> None:
+        self.app._save_advances(
+            self.app._player("Hellas"), ["pottery", "masonry"], {}, self.root
+        )
+        self.root.update_idletasks()
+        self.assertIn("2 Advances", self._text("Hellas", "subtitle"))
+
+        self.app._run_command(
+            lambda: self.app.service.set_ast_bonus("Hellas", True)
+        )
+        self.app._refresh_all()
+        self.root.update_idletasks()
+        self.assertIn("A.S.T. bonus", self._text("Hellas", "subtitle"))
+
+    def test_census_field_is_not_overwritten_while_focused(self) -> None:
+        """Kesken kirjoituksen olevaa kenttää ei saa kirjoittaa yli."""
+
+        widgets = self.app._row_widgets["Hellas"]
+        widgets["census_var"].set("41")
+        player = self.app._player("Hellas")
+
+        self.app._update_player_row(player, 1, focused=widgets["census_entry"])
+
+        self.assertEqual(widgets["census_var"].get(), "41")
+
+    def test_census_field_is_updated_when_not_focused(self) -> None:
+        widgets = self.app._row_widgets["Hellas"]
+        widgets["census_var"].set("41")
+        player = self.app._player("Hellas")
+
+        self.app._update_player_row(player, 1, focused=None)
+
+        self.assertEqual(widgets["census_var"].get(), str(player.census))
+
+    def test_rows_are_rebuilt_when_the_player_set_changes(self) -> None:
+        first = id(self.app._row_widgets["Hellas"]["badge"])
+
+        other = GameState(
+            player_count=2,
+            players=[
+                PlayerState("Saba", "S", "EAST"),
+                PlayerState("Parthia", "P", "EAST"),
+            ],
+            game_mode="EAST",
+        )
+        self.app._open_game(other, None)
+        self.root.update_idletasks()
+
+        self.assertNotIn("Hellas", self.app._row_widgets)
+        self.assertIn("Saba", self.app._row_widgets)
+        self.assertNotEqual(
+            first, id(self.app._row_widgets["Saba"]["badge"])
+        )
+
+    def test_hidden_tabs_are_deferred_until_shown(self) -> None:
+        self.app._refresh_all()
+
+        # Scoreboard on näkyvissä, joten vain se piirrettiin.
+        self.assertNotIn("summary", self.app._pending_tabs)
+        self.assertIn("ast", self.app._pending_tabs)
+        self.assertIn("sequence", self.app._pending_tabs)
+
+        self.app.notebook.select(self.app.ast_tab)
+        self.app._on_tab_changed()
+        self.assertNotIn("ast", self.app._pending_tabs)
+
+
 if __name__ == "__main__":
     unittest.main()

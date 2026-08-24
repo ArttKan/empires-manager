@@ -2398,16 +2398,18 @@ class MegaEmpiresApp:
         self._refresh_state()
         return True
 
-    def _open_advance_dialog(self, player: PlayerState) -> None:
-        if self.game is None:
+    def _open_advance_dialog(self, civilization: str) -> None:
+        player = self._player(civilization)
+        if self.game is None or player is None:
             return
         dialog = AdvanceDialog(self.root, player, self.game, lambda *a: False)
         dialog.on_save = lambda advances, flexible: self._save_advances(
             player, advances, flexible, dialog
         )
 
-    def _open_player_dialog(self, player: PlayerState) -> None:
-        if self.game is None:
+    def _open_player_dialog(self, civilization: str) -> None:
+        player = self._player(civilization)
+        if self.game is None or player is None:
             return
         dialog = PlayerDialog(self.root, player, self.game, lambda *a: False)
         dialog.on_save = lambda *values: self._save_player_details(
@@ -2473,6 +2475,9 @@ class MegaEmpiresApp:
     def _build_main_view(self) -> None:
         for child in self.root.winfo_children():
             child.destroy()
+        # Rivien widget-viittaukset osoittavat juuri tuhottuihin olioihin.
+        self._row_order = None
+        self._row_widgets = {}
 
         header = ttk.Frame(self.root, padding=(24, 14))
         header.pack(fill="x")
@@ -2555,12 +2560,33 @@ class MegaEmpiresApp:
             self._new_game()
 
     def _refresh_all(self) -> None:
+        """Päivitä otsikko ja näkyvä välilehti; piilossa olevat jäävät jonoon.
+
+        A.S.T.- ja Sequence-välilehdet piirretään yhä kokonaan uudelleen, mikä
+        maksaa yhdessä yli sata millisekuntia. Piilossa olevan välilehden
+        piirtäminen on tuo hinta ilman mitään hyötyä, joten se lykätään siihen
+        asti kun välilehti oikeasti näytetään.
+        """
+
         if self.game is None:
             return
         self._refresh_header()
-        self._refresh_summary()
-        self._refresh_ast()
-        self._refresh_sequence()
+        self._pending_tabs = {"summary", "ast", "sequence"}
+        self._refresh_pending_tab()
+
+    def _refresh_pending_tab(self) -> None:
+        if self.game is None or not hasattr(self, "notebook"):
+            return
+        pending = getattr(self, "_pending_tabs", set())
+        selected = self.notebook.select()
+        for name, tab, refresh in (
+            ("summary", self.summary_tab, self._refresh_summary),
+            ("ast", self.ast_tab, self._refresh_ast),
+            ("sequence", self.sequence_tab, self._refresh_sequence),
+        ):
+            if name in pending and selected == str(tab):
+                pending.discard(name)
+                refresh()
 
     def _refresh_header(self) -> None:
         if self.game is None:
@@ -2588,13 +2614,13 @@ class MegaEmpiresApp:
             )
         ):
             self._refresh_header()
-            self._refresh_sequence()
+            self._pending_tabs = {"sequence"}
+            self._refresh_pending_tab()
 
     def _on_tab_changed(self, _event: object | None = None) -> None:
         if self.game is None or not hasattr(self, "sequence_tab"):
             return
-        if self.notebook.select() == str(self.sequence_tab):
-            self._refresh_sequence()
+        self._refresh_pending_tab()
 
     def _change_cities(self, player: PlayerState, amount: int) -> None:
         current = self._player(player.civilization)
@@ -2621,13 +2647,42 @@ class MegaEmpiresApp:
             self._refresh_all()
 
     def _refresh_summary(self) -> None:
+        """Päivitä pistetaulu.
+
+        Rivit rakennetaan vain kerran. Aiemmin jokainen napinpainallus tuhosi ja
+        loi uudelleen lähes 500 widgetiä, mikä maksoi 18 pelaajalla yli sekunnin
+        — jokainen widgetin luonti ja tuho on Tcl-kutsu. Rivien järjestys on
+        kiinteä A.S.T.-ranking, joten ne eivät koskaan liiku ja pelkkä tekstien
+        päivitys riittää.
+        """
+
         if self.game is None:
             return
-        for child in self.summary_tab.winfo_children():
-            child.destroy()
-
         ordered = players_in_ast_order(self.game.players)
         rankings = visible_rankings(self.game.players)
+        order = [player.civilization for player in ordered]
+        if getattr(self, "_row_order", None) != order:
+            self._build_summary_rows(ordered, rankings)
+            return
+        # focus_get() on Tcl-kutsu, joten se kysytään kerran eikä riviä kohti.
+        focused = self.root.focus_get()
+        for player in ordered:
+            self._update_player_row(
+                player, rankings[player.civilization], focused
+            )
+
+    def _build_summary_rows(
+        self,
+        ordered: list[PlayerState],
+        rankings: dict[str, int],
+    ) -> None:
+        """Rakenna rivit alusta. Vain pelin avaus tai pelaajajoukon muutos."""
+
+        for child in self.summary_tab.winfo_children():
+            child.destroy()
+        self._row_widgets: dict[str, dict] = {}
+        self._row_order = [player.civilization for player in ordered]
+
         board = ttk.Frame(self.summary_tab, padding=8)
         board.pack(fill="both", expand=True)
         board.columnconfigure(0, weight=1, uniform="players")
@@ -2678,6 +2733,9 @@ class MegaEmpiresApp:
         outer.grid_propagate(False)
         parent.rowconfigure(row, weight=1)
 
+        widgets: dict = {"cache": {}}
+        self._row_widgets[player.civilization] = widgets
+
         badge = tk.Label(
             outer,
             text=str(ranking),
@@ -2687,65 +2745,87 @@ class MegaEmpiresApp:
             foreground=civilization.text_color,
         )
         badge.pack(side="left", fill="y")
+        widgets["badge"] = badge
+        widgets["cache"]["badge"] = str(ranking)
 
         identity = tk.Frame(outer, background=PANEL, width=215)
         identity.pack(side="left", fill="y", padx=(12, 5), pady=8)
         identity.pack_propagate(False)
-        tk.Label(
+        name_label = tk.Label(
             identity,
             text=player.display_name,
             anchor="w",
             font=("Segoe UI Semibold", 15),
             background=PANEL,
             foreground=TEXT,
-        ).pack(fill="x")
-        tk.Label(
+        )
+        name_label.pack(fill="x")
+        subtitle_label = tk.Label(
             identity,
-            text=(
-                f"{player.block}  •  {card_count} Advances"
-                + ("  •  A.S.T. bonus" if player.ast_bonus else "")
-            ),
+            text=self._row_subtitle(player),
             anchor="w",
             font=("Segoe UI", 10),
             background=PANEL,
             foreground=MUTED,
-        ).pack(fill="x", pady=(5, 0))
+        )
+        subtitle_label.pack(fill="x", pady=(5, 0))
+        widgets["name"] = name_label
+        widgets["cache"]["name"] = player.display_name
+        widgets["subtitle"] = subtitle_label
+        widgets["cache"]["subtitle"] = self._row_subtitle(player)
 
         score_frame = tk.Frame(outer, background=PANEL, width=105)
         score_frame.pack(side="left", fill="y", pady=7)
         score_frame.pack_propagate(False)
-        tk.Label(
+        total_label = tk.Label(
             score_frame,
             text=str(score.total),
             font=("Segoe UI Semibold", 28),
             background=PANEL,
             foreground=ACCENT,
-        ).pack()
-        tk.Label(
+        )
+        total_label.pack()
+        breakdown_label = tk.Label(
             score_frame,
-            text=f"{score.cities}+{score.ast}+{score.advances}+{score.bonus}",
+            text=self._row_breakdown(score),
             font=("Segoe UI", 9),
             background=PANEL,
             foreground=MUTED,
-        ).pack()
+        )
+        breakdown_label.pack()
+        widgets["total"] = total_label
+        widgets["cache"]["total"] = str(score.total)
+        widgets["breakdown"] = breakdown_label
+        widgets["cache"]["breakdown"] = self._row_breakdown(score)
 
         controls = tk.Frame(outer, background=PANEL)
         controls.pack(side="left", fill="both", expand=True, padx=5, pady=7)
-        self._counter(
+        cities_frame, cities_label = self._counter(
             controls,
             "Cities",
             player.cities,
             lambda: self._change_cities(player, -1),
             lambda: self._change_cities(player, 1),
-        ).pack(side="left", padx=4)
-        self._counter(
+        )
+        cities_frame.pack(side="left", padx=4)
+        ast_frame, ast_label = self._counter(
             controls,
             "A.S.T.",
-            f"{player.ast_step} / {score.ast} VP",
+            self._row_ast_text(player, score),
             lambda: self._change_ast(player, -1),
             lambda: self._change_ast(player, 1),
-        ).pack(side="left", padx=4)
-        self._census_editor(controls, player).pack(side="left", padx=4)
+        )
+        ast_frame.pack(side="left", padx=4)
+        census_frame, census_entry, census_var = self._census_editor(
+            controls, player
+        )
+        census_frame.pack(side="left", padx=4)
+        widgets["cities"] = cities_label
+        widgets["cache"]["cities"] = str(player.cities)
+        widgets["ast"] = ast_label
+        widgets["cache"]["ast"] = self._row_ast_text(player, score)
+        widgets["census_entry"] = census_entry
+        widgets["census_var"] = census_var
 
         actions = tk.Frame(outer, background=PANEL)
         actions.pack(side="right", fill="y", padx=(4, 10), pady=7)
@@ -2753,14 +2833,66 @@ class MegaEmpiresApp:
             actions,
             text="Advances",
             width=8,
-            command=lambda: self._open_advance_dialog(player),
+            command=lambda: self._open_advance_dialog(player.civilization),
         ).pack(pady=(0, 3))
         ttk.Button(
             actions,
             text="Details",
             width=8,
-            command=lambda: self._open_player_dialog(player),
+            command=lambda: self._open_player_dialog(player.civilization),
         ).pack()
+
+    @staticmethod
+    def _row_subtitle(player: PlayerState) -> str:
+        return (
+            f"{player.block}  •  {len(player.advances)} Advances"
+            + ("  •  A.S.T. bonus" if player.ast_bonus else "")
+        )
+
+    @staticmethod
+    def _row_breakdown(score) -> str:
+        return f"{score.cities}+{score.ast}+{score.advances}+{score.bonus}"
+
+    @staticmethod
+    def _row_ast_text(player: PlayerState, score) -> str:
+        return f"{player.ast_step} / {score.ast} VP"
+
+    def _set_row_text(self, widgets: dict, key: str, value: str) -> None:
+        """Kirjoita lappuun vain jos teksti tosiasiassa muuttui.
+
+        Vertailu tehdään Pythonissa välimuistista, koska sekä `cget` että
+        `configure` ovat Tcl-kutsuja. Muuttumaton rivi ei siis maksa mitään.
+        """
+
+        if widgets["cache"].get(key) == value:
+            return
+        widgets["cache"][key] = value
+        widgets[key].configure(text=value)
+
+    def _update_player_row(
+        self,
+        player: PlayerState,
+        ranking: int,
+        focused: tk.Misc | None = None,
+    ) -> None:
+        widgets = getattr(self, "_row_widgets", {}).get(player.civilization)
+        if widgets is None:
+            return
+        score = calculate_score(player)
+        self._set_row_text(widgets, "badge", str(ranking))
+        self._set_row_text(widgets, "name", player.display_name)
+        self._set_row_text(widgets, "subtitle", self._row_subtitle(player))
+        self._set_row_text(widgets, "total", str(score.total))
+        self._set_row_text(widgets, "breakdown", self._row_breakdown(score))
+        self._set_row_text(widgets, "cities", str(player.cities))
+        self._set_row_text(widgets, "ast", self._row_ast_text(player, score))
+
+        # Census-kenttää ei kirjoiteta yli sillä hetkellä kun siihen kirjoitetaan.
+        if focused is not None and focused is widgets["census_entry"]:
+            return
+        census = str(player.census)
+        if widgets["census_var"].get() != census:
+            widgets["census_var"].set(census)
 
     def _counter(
         self,
@@ -2769,7 +2901,12 @@ class MegaEmpiresApp:
         value: int | str,
         decrement: Callable[[], None],
         increment: Callable[[], None],
-    ) -> tk.Frame:
+    ) -> tuple[tk.Frame, tk.Label]:
+        """Palauta kehys ja arvolapun viittaus.
+
+        Rivit rakennetaan kerran ja päivitetään paikallaan, joten kutsujan on
+        saatava kiinni siitä lapusta jonka teksti myöhemmin muuttuu.
+        """
         frame = tk.Frame(parent, background=PANEL_ALT)
         tk.Label(
             frame,
@@ -2790,14 +2927,15 @@ class MegaEmpiresApp:
             foreground=TEXT,
             relief="flat",
         ).pack(side="left")
-        tk.Label(
+        value_label = tk.Label(
             row,
             text=str(value),
             width=8,
             font=("Segoe UI Semibold", 11),
             background=PANEL_ALT,
             foreground=TEXT,
-        ).pack(side="left")
+        )
+        value_label.pack(side="left")
         tk.Button(
             row,
             text="+",
@@ -2808,13 +2946,13 @@ class MegaEmpiresApp:
             foreground=TEXT,
             relief="flat",
         ).pack(side="left")
-        return frame
+        return frame, value_label
 
     def _census_editor(
         self,
         parent: tk.Widget,
         player: PlayerState,
-    ) -> tk.Frame:
+    ) -> tuple[tk.Frame, tk.Entry, tk.StringVar]:
         frame = tk.Frame(parent, background=PANEL_ALT)
         tk.Label(
             frame,
@@ -2851,17 +2989,31 @@ class MegaEmpiresApp:
         )
         entry.bind(
             "<FocusOut>",
-            lambda _event: (
-                value.set(str(player.census))
-                if value.get() == ""
-                else self._commit_census(player, value)
-            ),
+            lambda _event: self._restore_or_commit_census(player, value),
         )
         entry.bind(
             "<Return>",
             lambda _event: self._commit_census(player, value),
         )
-        return frame
+        return frame, entry, value
+
+    def _restore_or_commit_census(
+        self,
+        player: PlayerState,
+        value: tk.StringVar,
+    ) -> None:
+        """Tyhjä kenttä palautuu nykyiseen arvoon, muuten kirjataan muutos.
+
+        Arvo luetaan tuoreesta tilannekuvasta: rivi rakennetaan vain kerran,
+        joten sulkeuman `player` on piirtohetken kopio.
+        """
+
+        if value.get() != "":
+            self._commit_census(player, value)
+            return
+        current = self._player(player.civilization)
+        if current is not None:
+            value.set(str(current.census))
 
     def _commit_census(
         self,
@@ -3169,7 +3321,8 @@ class MegaEmpiresApp:
             lambda: self.service.set_turn(round_number, phase, actor="laptop")
         ):
             self._refresh_header()
-            self._refresh_sequence()
+            self._pending_tabs = {"sequence"}
+            self._refresh_pending_tab()
 
     def _render_major_calamities(self, parent: tk.Frame) -> None:
         tk.Label(
