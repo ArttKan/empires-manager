@@ -151,14 +151,18 @@ suite, and restarts **only if tests pass** — so a broken push cannot take the 
 service down. On the box the run reports `skipped=1`, because `tests/test_ui.py`
 skips itself where tkinter is absent; that is expected.
 
-**Trap:** `deploy/mega-empires-backend.service` is a *template*. The box's copy has
-the real `ECHO_TOKEN` substituted in and carries
-`git update-index --skip-worktree`, so **changes to that file never reach the box
-via a normal deploy** — the service restarts happily on the old unit and the only
-symptom is wrong runtime behaviour. If Phase B adds an `Environment=` variable,
-reconcile it by hand (see [deploy/README.md](deploy/README.md)), or better, move
-the token into an `EnvironmentFile=` outside the repo so the unit can be tracked
-normally.
+**systemd unit:** `deploy/mega-empires-backend.service` is the only version of
+the unit — it holds no secrets, so it is tracked normally and reaches the box
+through an ordinary deploy. The `ECHO_TOKEN` lives in
+`/etc/mega-empires-backend.env` (root-owned, 0600), read by systemd before it
+drops to the service user. `EnvironmentFile` is deliberately mandatory: a missing
+file stops the service rather than letting it serve wrongly.
+
+This replaces an earlier arrangement where the box's copy carried the token inline
+under `git update-index --skip-worktree`, which silently prevented unit changes
+from ever reaching the server. **The one-time migration off that is in
+[deploy/README.md](deploy/README.md); until it has been run on the box, the old
+skip-worktree behaviour still applies there.**
 
 **Phase B, not yet started:** extract a `GameService` that owns the `GameState`
 and exposes validated commands instead of letting callers mutate dataclasses;

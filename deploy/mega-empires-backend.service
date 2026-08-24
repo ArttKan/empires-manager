@@ -1,10 +1,15 @@
-; Viitetiedosto. Sovita tämä palvelimella jo olevaan unitiin äläkä korvaa
-; sokkona: tarkista erityisesti venvin polku ja bearer-token.
+; Tämä tiedosto on unitin ainoa versio: siinä ei ole salaisuuksia, joten se on
+; tavallinen gitin seuraama tiedosto ja päivittyy palvelimelle normaalisti.
+; Salaisuudet luetaan EnvironmentFile-tiedostosta repon ulkopuolelta.
 ;
 ; Asennus:
 ;   sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
 ;   sudo systemctl daemon-reload
 ;   sudo systemctl restart mega-empires-backend.service
+;
+; HUOM: EnvironmentFile on pakollinen. Jos tiedosto puuttuu, palvelu ei käynnisty
+; lainkaan — tämä on tahallista, jotta puuttuva token näkyy heti eikä vasta
+; virheellisenä ajonaikaisena käytöksenä.
 
 [Unit]
 Description=Mega Empires backend
@@ -25,11 +30,16 @@ StateDirectory=mega-empires
 StateDirectoryMode=0750
 Environment=MEGA_EMPIRES_DATA_DIR=/var/lib/mega-empires
 
-; Bearer-token pidetään unitissa, ei koodissa eikä gitissä. Nimen on vastattava
-; main.py:n lukemaa muuttujaa (ECHO_TOKEN); main.py lukee sen tuontihetkellä ja
-; kieltäytyy palvelemasta /echo-reittiä jos se puuttuu, joten väärä nimi näkyy
-; vasta HTTP 500 -vastauksena eikä käynnistysvirheenä.
-Environment=ECHO_TOKEN=VAIHDA-TAMA
+; Salaisuudet tulevat repon ulkopuolelta. Tiedosto on root:root 0600, mutta
+; systemd lukee sen ennen käyttäjän vaihtoa, joten sovelluskäyttäjän ei tarvitse
+; päästä siihen käsiksi lainkaan.
+;
+; Sisältö (yksi rivi):
+;   ECHO_TOKEN=<oikea token>
+;
+; Muuttujan nimen on vastattava main.py:n lukemaa nimeä (ECHO_TOKEN). Väärä nimi
+; ei estä käynnistystä, vaan näkyy vasta /echo-reitin HTTP 500 -vastauksena.
+EnvironmentFile=/etc/mega-empires-backend.env
 
 ; Sovellus on main.py ja se palvelee myös sse-test.html-tiedoston suhteellisella
 ; polulla, joten WorkingDirectory on merkityksellinen eikä vain kosmeettinen.

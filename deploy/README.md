@@ -121,13 +121,15 @@ sudo -u megaempires /home/megaempires/venv/bin/pip install -r \
 
 ### 4. systemd ja sudo-sääntö
 
-Sovita `mega-empires-backend.service` nykyiseen unitiin — älä korvaa sokkona.
-Olennaiset lisäykset ovat `StateDirectory=mega-empires` ja
-`Environment=MEGA_EMPIRES_DATA_DIR=…`. Tarkista myös, että `ExecStart` osoittaa
-uuteen venviin ja että bearer-token siirtyy vanhasta unitista mukana.
+Tarkista, että `ExecStart` osoittaa oikeaan venviin. Unit ei sisällä
+salaisuuksia, joten se voidaan kopioida sellaisenaan — token luetaan
+`/etc/mega-empires-backend.env`-tiedostosta, joka on luotava **ennen**
+käynnistystä tai palvelu ei käynnisty lainkaan.
 
 ```bash
 cd /home/megaempires/mega-empires-backend
+sudo install -m 0600 -o root -g root /dev/null /etc/mega-empires-backend.env
+printf 'ECHO_TOKEN=%s\n' '<token>' | sudo tee /etc/mega-empires-backend.env >/dev/null
 sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
 sudo install -m 0440 -o root -g root \
     deploy/megaempires-deploy.sudoers /etc/sudoers.d/megaempires-deploy
@@ -207,57 +209,78 @@ lopulta yhdistetään masteriin:
 BRANCH=master sudo -u megaempires .../deploy.sh
 ```
 
-## systemd-unit on malli, ei elävä konfiguraatio
+## systemd-unit ja salaisuudet
 
-Repon `deploy/mega-empires-backend.service` on **malli**. Palvelimen kopioon on
-kirjoitettu oikea `ECHO_TOKEN` placeholderin tilalle, ja jotta tuo paikallinen
-muutos ei näy likaisena eikä `git pull` yliaja sitä, checkoutissa on ajettu:
-
-```bash
-git update-index --skip-worktree deploy/mega-empires-backend.service
-```
-
-**Seuraus, joka on syytä muistaa Phase B:ssä:** jos repon malli muuttuu — vaikkapa
-uusi `Environment=`-muuttuja — muutos **ei** päädy palvelimelle pelkällä
-`deploy.sh`-ajolla. Deploy onnistuu ja palvelu käynnistyy, mutta vanhalla
-unitilla. Vika ei näy virheenä vaan väärin toimivana sovelluksena.
-
-Käsin sovittaminen:
-
-```bash
-cd /home/megaempires/mega-empires-backend
-sudo -u megaempires git update-index --no-skip-worktree \
-    deploy/mega-empires-backend.service
-sudo -u megaempires git checkout deploy/mega-empires-backend.service
-sudo -u megaempires git pull
-# Kirjoita oikea ECHO_TOKEN uuteen malliin, sitten:
-sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl restart mega-empires-backend.service
-sudo -u megaempires git update-index --skip-worktree \
-    deploy/mega-empires-backend.service
-```
-
-### Parempi ratkaisu, jos tämä alkaa haitata
-
-`--skip-worktree` on olemassa vain siksi, että salaisuus on unitin sisällä. Jos
-token siirretään repon ulkopuoliseen tiedostoon, malli muuttuu tavalliseksi
-tiedostoksi jonka `git pull` voi päivittää vapaasti:
+Unit ei sisällä salaisuuksia, joten `deploy/mega-empires-backend.service` on
+tavallinen gitin seuraama tiedosto: repon versio on ainoa versio, ja se päivittyy
+palvelimelle normaalisti. Token luetaan repon ulkopuolisesta tiedostosta:
 
 ```ini
 EnvironmentFile=/etc/mega-empires-backend.env
 ```
 
+Tiedosto on `root:root 0600`. systemd lukee sen ennen kuin se vaihtaa prosessin
+`megaempires`-käyttäjäksi, joten sovelluskäyttäjän ei tarvitse päästä siihen
+käsiksi lainkaan.
+
+`EnvironmentFile` on tahallisesti pakollinen (ei `-`-etuliitettä): jos tiedosto
+puuttuu, palvelu ei käynnisty ollenkaan. Se on parempi kuin käynnistyvä palvelu,
+jonka `/echo` vastaa hiljaa virheellisesti.
+
+### Siirtymä skip-worktreestä — kertaluontoinen
+
+Aiemmin unitin repoversio oli pelkkä malli: palvelimen kopioon oli kirjoitettu
+oikea token, ja `git update-index --skip-worktree` esti sen näkymisen likaisena.
+Sivuvaikutus oli ikävä — repon unit-muutokset eivät koskaan päätyneet
+palvelimelle, ja deploy näytti onnistuvan vaikka palvelu jäi vanhaan unitiin.
+
+Aja nämä kerran palvelimella. **Järjestys on olennainen:** token on luettava
+talteen ennen kuin paikallinen muokkaus hylätään, ja env-tiedoston on oltava
+olemassa ennen kuin uusi unit otetaan käyttöön.
+
 ```bash
+# 1. Lue nykyinen token talteen ENNEN kuin mitään hylätään.
+sudo systemctl cat mega-empires-backend.service | grep ECHO_TOKEN
+
+# 2. Luo env-tiedosto repon ulkopuolelle.
 sudo install -m 0600 -o root -g root /dev/null /etc/mega-empires-backend.env
-echo 'ECHO_TOKEN=oikea-token' | sudo tee /etc/mega-empires-backend.env
+printf 'ECHO_TOKEN=%s\n' '<vaiheessa 1 luettu token>' \
+    | sudo tee /etc/mega-empires-backend.env >/dev/null
+
+# 3. Vapauta tiedosto gitin normaaliin hallintaan ja hae uusi malli.
+cd /home/megaempires/mega-empires-backend
 sudo -u megaempires git update-index --no-skip-worktree \
     deploy/mega-empires-backend.service
+sudo -u megaempires git checkout -- deploy/mega-empires-backend.service
+sudo -u megaempires git pull
+
+# 4. Ota uusi unit käyttöön.
+sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart mega-empires-backend.service
 ```
 
-Tämän jälkeen unit on kokonaan gitin hallinnassa eikä hiljaista eroa repon ja
-palvelimen välillä enää synny. Kannattaa tehdä ennen kuin Phase B lisää lisää
-ympäristömuuttujia.
+Tarkista, että token todella välittyi — tämä on ainoa asia jota siirtymä voi
+rikkoa hiljaisesti:
+
+```bash
+systemctl status mega-empires-backend.service
+curl -s -X POST https://empiresmanager.com/echo \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"env-file test"}'
+```
+
+Vastauksen pitää olla `{"you_sent":"env-file test",...}`. HTTP 500 tarkoittaa,
+ettei `ECHO_TOKEN` päätynyt prosessille; HTTP 401 tarkoittaa, että token on eri
+kuin curlissa annettu.
+
+Tämän jälkeen `git status` on palvelimella puhdas ilman skip-worktree-kikkaa, ja
+repon unit-muutokset menevät perille tavallisella deployllä.
+
+**Varmuuskopiot:** `/etc/mega-empires-backend.env` sisältää salaisuuden. Jos
+palvelimelta otetaan varmuuskopioita, tämä tiedosto ei kuulu samaan paikkaan
+pelitallennusten kanssa.
 
 ## Vianetsintä
 
