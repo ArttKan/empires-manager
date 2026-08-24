@@ -282,6 +282,55 @@ repon unit-muutokset menevät perille tavallisella deployllä.
 palvelimelta otetaan varmuuskopioita, tämä tiedosto ei kuulu samaan paikkaan
 pelitallennusten kanssa.
 
+## Reittien tarkistus deployn jälkeen
+
+`/health` ei vaadi tokenia ja kertoo myös onko peli ladattu:
+
+```bash
+curl -s https://empiresmanager.com/health
+```
+
+Loput vaativat tokenin:
+
+```bash
+TOKEN=<oikea token>
+curl -s https://empiresmanager.com/state -H "Authorization: Bearer $TOKEN"
+```
+
+**HTTP 503 tarkoittaa, ettei palvelimella ole peliä** hakemistossa
+`/var/lib/mega-empires/nykyinen_peli.json`. Se ei ole vika: peliä ei vielä voi
+luoda HTTP:n yli, se tulee `RemoteGameService`-vaiheessa. Testipelin saa paikalleen
+kehityskoneelta:
+
+```bash
+scp tallennukset/testipeli.json \
+    megaempires@100.107.240.83:/var/lib/mega-empires/nykyinen_peli.json
+sudo systemctl restart mega-empires-backend.service
+```
+
+Uudelleenkäynnistys on tarpeen, koska palvelu lukee tallennuksen kerran ja pitää
+sen muistissa.
+
+Komennon läpimeno päästä päähän:
+
+```bash
+curl -s -X POST https://empiresmanager.com/players/Minoa/cities \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"value": 4}'
+```
+
+Vastauksessa palautuu uusi `state_version` ja pelaajan tila. Odotetut virhekoodit:
+401 väärä token, 404 tuntematon sivilisaatio, 409 vanhentunut `expected_version`
+(vastaus kertoo nykyisen), 422 sääntörikkomus.
+
+SSE-virta ei vaadi tokenia, koska se ei kuljeta pelidataa — vain versionumeron:
+
+```bash
+curl -N https://empiresmanager.com/events
+```
+
+Selaindiagnostiikka on yhä `https://empiresmanager.com/sse-test`.
+
 ## Vianetsintä
 
 ```bash

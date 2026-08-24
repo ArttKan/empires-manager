@@ -38,10 +38,19 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 ## Commands
 
 ```bash
-python3 app.py                          # run the app (needs a display)
-python3 -m unittest discover -v         # run all 102 tests
-python3 -m unittest tests.test_scoring  # run one module
+python3 app.py                              # run the app (needs a display)
+.venv/bin/python -m unittest discover -v    # all 123 tests
+python3 -m unittest discover -v             # 102 tests; HTTP tests skip
+.venv/bin/python -m unittest tests.test_http
+.venv/bin/uvicorn main:app --reload         # run the server locally
 ```
+
+**Use `.venv/bin/python` to run the suite.** `tests/test_http.py` needs fastapi and
+httpx and skips itself under bare `python3`, so a green bare run proves less than
+it looks. Recreate the venv with `python3 -m venv .venv` and
+`.venv/bin/pip install -r requirements.txt` (needs the `python3.14-venv` apt
+package). The venv is for the **server only** — the desktop app and every
+pure-logic module must keep running under bare `python3`.
 
 Dev machine: Ubuntu 26.04, Python 3.14 as `python3` (there is no bare `python`).
 The GUI needs the `python3-tk` apt package. `tests/test_ui.py` skips itself when
@@ -71,6 +80,7 @@ the backend conversion tractable.
 | [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
 | [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
 | [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
+| [main.py](main.py) | FastAPI HTTP layer over `GameService`. Thin by design: routes, auth, error mapping, SSE fan-out. **No game logic here** |
 | [mega_empires/ui.py](mega_empires/ui.py) | Tkinter app, now a **client of `GameService`**: new-game wizard, tabs (Scoreboard / A.S.T. / Sequence of Play), Advances, Details and calamity dialogs. By far the largest module |
 
 ## Domain rules that are easy to get wrong
@@ -145,6 +155,11 @@ the backend conversion tractable.
   so the `player` captured at build time is a stale copy. Look the current value up
   with `_player(civilization)` — this applies to counters, the census field, and
   both dialog openers.
+- **Tests must never touch the real save directory.** `save_game(game, None)` and
+  `get_service()` both fall back to `storage.default_save_path()`, which on a dev
+  machine is the repo's `tallennukset/`. Tests that opened a game with `path=None`
+  silently overwrote a live save. Every test that persists must set
+  `MEGA_EMPIRES_DATA_DIR` to a temp directory *and* pass an explicit path.
 - Add tests to the matching `tests/test_*.py` for any logic change. UI tests
   construct objects via `object.__new__(MegaEmpiresApp)` and a bare `tk.Tcl()`
   interpreter to avoid opening a window — follow that pattern.
@@ -200,10 +215,24 @@ Done: `service.py` with `LocalGameService` (commands, version counters, JSONL
 command log, A.S.T. bonus validation), and `ui.py` fully wired to it — all eight
 mutation sites plus both dialogs now issue commands instead of mutating dataclasses.
 
-Next: the HTTP layer on the box replacing the Phase A `/echo` placeholder, then
-`RemoteGameService` over HTTP with the Tkinter app polling `/state` on a
-`root.after()` timer — no SSE client in Tkinter, to keep threading out of the
-desktop app. Phones come last.
+Done also: [main.py](main.py) — real endpoints backed by `LocalGameService`.
+Commands map to `POST /players/{civ}/…` and `POST /turn`; errors map to 404
+unknown player, **409 with the current version**, 422 rule violation, 400
+otherwise. A single `asyncio.Lock` serialises commands.
+
+**`/events` carries no game data and needs no token** — only `{"state_version": N}`.
+Browser `EventSource` cannot send an `Authorization` header, so rather than putting
+a token in the query string the stream is just a "refetch now" signal and clients
+pull `/state` with their token. This also makes "every reconnect pulls a fresh
+snapshot" fall out for free. **Do not put game data on that stream.**
+
+Next: `RemoteGameService` implementing the same interface over HTTP, with the
+Tkinter app polling `/state` on a `root.after()` timer — no SSE client in Tkinter,
+to keep threading out of the desktop app. Phones come last.
+
+**Known gap:** `get_service()` loads the save once and caches it. A game created or
+replaced on disk after the server started is not picked up; there is no way to
+create a game over HTTP yet.
 
 **Not yet wired:** commands accept `expected_version` but `ui.py` does not pass it,
 because the desktop app is currently the only writer. Pass it once there is more

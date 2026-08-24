@@ -1,5 +1,9 @@
 import importlib.util
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 # Palvelinasennus on headless eikä siinä ole python3-tk-pakettia. Tällöin koko
 # moduuli ohitetaan, jotta testit voi ajaa myös palvelimella ennen käynnistystä.
@@ -10,6 +14,7 @@ import tkinter as tk
 
 from mega_empires.models import GameState, PlayerState
 from mega_empires.service import LocalGameService
+from mega_empires.storage import DATA_DIRECTORY_VARIABLE
 from mega_empires.sequence import PHASE_BY_NUMBER
 from mega_empires.ui import (
     CALAMITY_DIALOG_SPECS,
@@ -334,6 +339,17 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         except tk.TclError as error:  # ei näyttöä käytettävissä
             raise unittest.SkipTest(f"no display: {error}")
         self.root.withdraw()
+
+        # `_open_game` tallentaa heti. Ilman omaa hakemistoa tallennus menisi
+        # `default_save_path()`:iin eli kehittäjän oikeaan `tallennukset/`
+        # -hakemistoon ja korvaisi käynnissä olevan pelin. Sekä polku että
+        # ympäristömuuttuja asetetaan, jotta kumpikaan reitti ei osu sinne.
+        self._directory = tempfile.TemporaryDirectory()
+        self._environment = mock.patch.dict(
+            os.environ, {DATA_DIRECTORY_VARIABLE: self._directory.name}
+        )
+        self._environment.start()
+        self.save_path = Path(self._directory.name) / "peli.json"
         game = GameState(
             player_count=3,
             players=[
@@ -348,11 +364,13 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         self.app.game = None
         self.app.service = None
         self.app.save_path = None
-        self.app._open_game(game, None)
+        self.app._open_game(game, self.save_path)
         self.root.update_idletasks()
 
     def tearDown(self) -> None:
         self.root.destroy()
+        self._environment.stop()
+        self._directory.cleanup()
 
     def _text(self, civilization: str, key: str) -> str:
         return self.app._row_widgets[civilization][key].cget("text")
@@ -425,7 +443,7 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
             ],
             game_mode="EAST",
         )
-        self.app._open_game(other, None)
+        self.app._open_game(other, Path(self._directory.name) / 'toinen.json')
         self.root.update_idletasks()
 
         self.assertNotIn("Hellas", self.app._row_widgets)

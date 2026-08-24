@@ -8,50 +8,65 @@
     body { font-family: sans-serif; padding: 2rem; font-size: 1.2rem; }
     .big { font-size: 3rem; font-weight: bold; }
     .ok { color: green; }
-    .stale { color: red; }
+    .bad { color: red; }
+    .muted { color: #555; }
     #log { font-size: 0.9rem; color: #555; margin-top: 2rem; white-space: pre-wrap; }
   </style>
 </head>
 <body>
-  <div>Latest tick:</div>
-  <div class="big" id="tick">—</div>
-  <div>Seconds since last event: <span id="age">—</span></div>
-  <div id="status">connecting…</div>
+  <div>Latest state version:</div>
+  <div class="big" id="version">—</div>
+  <div>Connection: <span id="status">connecting…</span></div>
+  <div class="muted">Seconds since last change: <span id="age">—</span></div>
+  <p class="muted">
+    Idle gaps are normal — the stream only sends an event when the game state
+    actually changes. Heartbeat comments keep the connection open in between but
+    are invisible to JavaScript, so a growing counter here is not a fault.
+  </p>
   <div id="log"></div>
 
   <script>
-    const tickEl = document.getElementById('tick');
+    const versionEl = document.getElementById('version');
     const ageEl = document.getElementById('age');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
 
-    let lastReceived = null;
+    let lastChange = null;
 
     function log(msg) {
       const t = new Date().toLocaleTimeString();
       logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
     }
 
-    const es = new EventSource('https://empiresmanager.com/events');
+    // Suhteellinen polku: sama sivu toimii sekä tunnelin läpi että paikallisesti.
+    const es = new EventSource('/events');
 
-    es.addEventListener('tick', (e) => {
-      tickEl.textContent = e.data;
-      lastReceived = Date.now();
-      statusEl.textContent = 'receiving';
-      statusEl.className = '';
+    es.addEventListener('state', (e) => {
+      let version = '—';
+      try {
+        version = JSON.parse(e.data).state_version ?? 'no game';
+      } catch (err) {
+        version = '(unparseable)';
+      }
+      versionEl.textContent = version;
+      lastChange = Date.now();
+      log('state version -> ' + version);
     });
 
-    es.onopen = () => log('connection opened');
-    es.onerror = (e) => {
+    es.onopen = () => {
+      statusEl.textContent = 'open';
+      statusEl.className = 'ok';
+      log('connection opened');
+    };
+    es.onerror = () => {
+      statusEl.textContent = 'dropped, readyState=' + es.readyState;
+      statusEl.className = 'bad';
       log('error / connection dropped, readyState=' + es.readyState);
-      statusEl.textContent = 'ERROR — see log';
     };
 
     setInterval(() => {
-      if (lastReceived === null) return;
-      const secs = Math.round((Date.now() - lastReceived) / 1000);
-      ageEl.textContent = secs;
-      ageEl.className = secs > 5 ? 'stale' : 'ok';
+      if (lastChange === null) return;
+      ageEl.textContent = Math.round((Date.now() - lastChange) / 1000);
     }, 1000);
   </script>
 </body>

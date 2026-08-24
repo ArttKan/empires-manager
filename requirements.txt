@@ -1,2 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+
+# Tarvitaan fastapi.testclientille, jota deploy.sh:n testiportti käyttää
+# palvelimella. Kiinnitä versio palvelimen pip freezestä ensimmäisen
+# asennuksen jälkeen, kuten muutkin rivit.
+httpx
