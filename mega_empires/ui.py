@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 from pathlib import Path
@@ -27,7 +28,14 @@ from .data import (
 from .credits import advance_price, color_credits, flexible_credit_entitlement
 from .models import GameState, PlayerState
 from .scoring import calculate_score, players_in_ast_order, visible_rankings
-from .service import CommandError, LocalGameService, RuleViolation
+from .remote import RemoteGameService
+from .service import (
+    CommandError,
+    LocalGameService,
+    RuleViolation,
+    ServiceUnavailable,
+    VersionConflict,
+)
 from .sequence import (
     PHASES,
     PHASE_BY_NUMBER,
@@ -53,6 +61,19 @@ TEXT = "#f5f7fa"
 MUTED = "#aeb9c7"
 ACCENT = "#d6a642"
 ERROR = "#b94141"
+
+# Etäpalvelinta käytettäessä muutokset voivat tulla puhelimista, joten näkymä
+# kysyy tuoretta tilaa ajastimella. Kysely on halpa: se vertaa vain
+# state_versionia eikä piirrä mitään jos mikään ei muuttunut.
+SERVER_VARIABLE = "MEGA_EMPIRES_SERVER"
+TOKEN_VARIABLE = "MEGA_EMPIRES_TOKEN"
+POLL_INTERVAL_MS = 2000
+# Yhteyden katkettua kysely harvenee: urllib on estävä, joten tiheä kysely
+# kuollutta palvelinta vasten jumittaisi käyttöliittymän aikakatkaisun ajaksi.
+POLL_BACKOFF_MS = 15000
+# Census-kenttä kirjoittaa jokaisella näppäimen nousulla. Paikallisesti se on
+# ilmaista, verkon yli se olisi pyyntö per merkki.
+CENSUS_DEBOUNCE_MS = 400
 AST_ERA_COLORS = (
     "#354252",
     "#51463f",
@@ -2309,6 +2330,10 @@ class MegaEmpiresApp:
         self._startup()
 
     def _startup(self) -> None:
+        server = os.environ.get(SERVER_VARIABLE, "").strip()
+        if server:
+            self._connect_remote(server)
+            return
         saves = list_saved_games()
         if not saves:
             self._new_game()
@@ -2331,6 +2356,41 @@ class MegaEmpiresApp:
             )
             self._startup()
 
+    def _connect_remote(self, base_url: str) -> None:
+        """Liity palvelimella olevaan peliin.
+
+        Etätilassa peli on palvelimella eikä paikallisia tallennuksia avata:
+        totuus on yksi, ja tämä näkymä on sen asiakas.
+        """
+
+        service = RemoteGameService(
+            base_url, os.environ.get(TOKEN_VARIABLE, "")
+        )
+        try:
+            game = service.snapshot()
+        except CommandError as error:
+            if not messagebox.askyesno(
+                "Could not reach the game server",
+                f"{error}\n\nStart a local game instead?",
+                icon="warning",
+                parent=self.root,
+            ):
+                self.root.destroy()
+                return
+            saves = list_saved_games()
+            if saves:
+                SavedGameDialog(
+                    self.root, saves, self._load_selected_game, self._new_game
+                )
+            else:
+                self._new_game()
+            return
+        self.service = service
+        self.save_path = None
+        self.game = game
+        self._build_main_view()
+        self._poll()
+
     def _new_game(self) -> None:
         for child in self.root.winfo_children():
             child.destroy()
@@ -2342,6 +2402,36 @@ class MegaEmpiresApp:
         self.service = LocalGameService(game, save_path=path)
         self._refresh_state()
         self._build_main_view()
+
+    def _poll(self) -> None:
+        """Hae tuore tila palvelimelta ja piirrä vain jos versio muuttui."""
+
+        if not isinstance(self.service, RemoteGameService):
+            return
+        delay = POLL_INTERVAL_MS
+        try:
+            snapshot = self.service.snapshot()
+        except CommandError as error:
+            # Yhteyskatko ei ole pelitilan muutos: näkymä jätetään ennalleen.
+            self._set_connected(False, str(error))
+            delay = POLL_BACKOFF_MS
+        else:
+            self._set_connected(True, "")
+            if (
+                self.game is None
+                or snapshot.state_version != self.game.state_version
+            ):
+                self.game = snapshot
+                self._refresh_all()
+        self._poll_job = self.root.after(delay, self._poll)
+
+    def _set_connected(self, connected: bool, message: str) -> None:
+        if getattr(self, "_connected", None) == connected:
+            return
+        self._connected = connected
+        self._connection_message = message
+        if self.game is not None and hasattr(self, "status_label"):
+            self._refresh_header()
 
     def _refresh_state(self) -> None:
         """Hae tuore tilannekuva palvelulta. Palvelu tallentaa itse."""
@@ -2381,6 +2471,19 @@ class MegaEmpiresApp:
 
         try:
             command()
+        except VersionConflict:
+            # Joku muu ehti ensin. Oikea vastaus ei ole virheilmoitus vaan tuore
+            # näkymä: automaattinen uudelleenyritys yliajaisi toisen muutoksen.
+            self._refresh_state()
+            self._refresh_all()
+            messagebox.showinfo(
+                "View refreshed",
+                "Another device changed this player first. The board now shows "
+                "the current values — check them and repeat your change if it "
+                "is still needed.",
+                parent=parent or self.root,
+            )
+            return False
         except RuleViolation as error:
             messagebox.showerror(
                 "Cannot save change",
@@ -2423,13 +2526,15 @@ class MegaEmpiresApp:
         flexible_credits: dict[str, int],
         parent: tk.Misc,
     ) -> bool:
-        if self.service is None:
+        current = self._player(player.civilization)
+        if self.service is None or current is None:
             return False
         accepted = self._run_command(
             lambda: self.service.set_advances(
-                player.civilization,
+                current.civilization,
                 advances,
                 flexible_credits,
+                expected_version=current.version,
                 actor="laptop",
             ),
             parent,
@@ -2449,17 +2554,19 @@ class MegaEmpiresApp:
         ast_bonus: bool,
         parent: tk.Misc,
     ) -> bool:
-        if self.service is None:
+        current = self._player(player.civilization)
+        if self.service is None or current is None:
             return False
         accepted = self._run_command(
             lambda: self.service.set_player_details(
-                player.civilization,
+                current.civilization,
                 nickname=nickname,
                 block=block,
                 cities=cities,
                 ast_step=ast_step,
                 census=census,
                 ast_bonus=ast_bonus,
+                expected_version=current.version,
                 actor="laptop",
             ),
             parent,
@@ -2548,6 +2655,14 @@ class MegaEmpiresApp:
         self._refresh_all()
 
     def _confirm_new_game(self) -> None:
+        if isinstance(self.service, RemoteGameService):
+            messagebox.showinfo(
+                "Not available in server mode",
+                "The game lives on the server and cannot be replaced from "
+                "here yet. Creating a game over HTTP is not implemented.",
+                parent=self.root,
+            )
+            return
         if messagebox.askyesno(
             "Start a new game?",
             "The current game remains in the latest save only until the new "
@@ -2599,10 +2714,17 @@ class MegaEmpiresApp:
                 f"{self.game.player_count} players  •  "
                 f"{self.game.ast_variant.title()} A.S.T.  •  "
                 f"Turn {self.game.round_number}  •  "
-                "Autosave enabled"
+                + self._connection_text()
             )
         )
         self.turn_label.configure(text=str(self.game.round_number))
+
+    def _connection_text(self) -> str:
+        if not isinstance(self.service, RemoteGameService):
+            return "Autosave enabled"
+        if getattr(self, "_connected", True):
+            return f"Connected to {self.service.base_url}"
+        return f"OFFLINE — {getattr(self, '_connection_message', '')}"
 
     def _change_round(self, amount: int) -> None:
         if self.game is None or self.service is None:
@@ -2629,7 +2751,10 @@ class MegaEmpiresApp:
         target = max(0, min(9, current.cities + amount))
         if self._run_command(
             lambda: self.service.set_cities(
-                current.civilization, target, actor="laptop"
+                current.civilization,
+                target,
+                expected_version=current.version,
+                actor="laptop",
             )
         ):
             self._refresh_all()
@@ -2641,7 +2766,10 @@ class MegaEmpiresApp:
         target = max(0, min(AST_MAX_STEP, current.ast_step + amount))
         if self._run_command(
             lambda: self.service.set_ast_step(
-                current.civilization, target, actor="laptop"
+                current.civilization,
+                target,
+                expected_version=current.version,
+                actor="laptop",
             )
         ):
             self._refresh_all()
@@ -2985,7 +3113,7 @@ class MegaEmpiresApp:
         entry.pack(padx=6, pady=(2, 3), ipady=3)
         entry.bind(
             "<KeyRelease>",
-            lambda _event: self._commit_census(player, value),
+            lambda _event: self._schedule_census_commit(player, value),
         )
         entry.bind(
             "<FocusOut>",
@@ -3015,6 +3143,29 @@ class MegaEmpiresApp:
         if current is not None:
             value.set(str(current.census))
 
+    def _schedule_census_commit(
+        self,
+        player: PlayerState,
+        value: tk.StringVar,
+    ) -> None:
+        """Viivytä kirjausta, kunnes kirjoittaminen tauko.
+
+        Ilman tätä "45" lähettäisi kaksi komentoa, joista ensimmäinen asettaisi
+        Censusiksi 4. Paikallisesti se olisi vain turhaa lokia, verkon yli se
+        olisi pyyntö per merkki ja välitila näkyisi hetken muille asiakkaille.
+        """
+
+        jobs = getattr(self, "_census_jobs", None)
+        if jobs is None:
+            jobs = self._census_jobs = {}
+        pending = jobs.pop(player.civilization, None)
+        if pending is not None:
+            self.root.after_cancel(pending)
+        jobs[player.civilization] = self.root.after(
+            CENSUS_DEBOUNCE_MS,
+            lambda: self._commit_census(player, value),
+        )
+
     def _commit_census(
         self,
         player: PlayerState,
@@ -3029,7 +3180,10 @@ class MegaEmpiresApp:
             return
         self._run_command(
             lambda: self.service.set_census(
-                current.civilization, census, actor="laptop"
+                current.civilization,
+                census,
+                expected_version=current.version,
+                actor="laptop",
             )
         )
 
@@ -4010,9 +4164,15 @@ class MegaEmpiresApp:
     def _set_ast(self, player: PlayerState, step: int) -> None:
         if self.service is None:
             return
+        current = self._player(player.civilization)
+        if current is None:
+            return
         if self._run_command(
             lambda: self.service.set_ast_step(
-                player.civilization, step, actor="laptop"
+                current.civilization,
+                step,
+                expected_version=current.version,
+                actor="laptop",
             )
         ):
             self._refresh_all()

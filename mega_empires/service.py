@@ -57,6 +57,15 @@ class RuleViolation(CommandError):
     """Komento rikkoisi pelisääntöä (HTTP 422)."""
 
 
+class ServiceUnavailable(CommandError):
+    """Palveluun ei saatu yhteyttä, tai sillä ei ole peliä (HTTP 503).
+
+    Erotettu muista siksi, että käyttöliittymän on käyttäydyttävä eri tavalla:
+    hylätty komento on käyttäjän virhe, katkennut yhteys ei ole. Jälkimmäisessä
+    näkymä pidetään ennallaan eikä sitä tulkita pelitilan muutokseksi.
+    """
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """Komennon tulos. `player` on kopio, ei viittaus palvelun tilaan."""

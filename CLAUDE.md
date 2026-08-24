@@ -39,14 +39,14 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 123 tests
-python3 -m unittest discover -v             # 102 tests; HTTP tests skip
+.venv/bin/python -m unittest discover -v    # all 140 tests
+python3 -m unittest discover -v             # 108 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
 
-**Use `.venv/bin/python` to run the suite.** `tests/test_http.py` needs fastapi and
-httpx and skips itself under bare `python3`, so a green bare run proves less than
+**Use `.venv/bin/python` to run the suite.** `tests/test_http.py` and `tests/test_remote.py` need
+fastapi/uvicorn/httpx and skip themselves under bare `python3`, so a green bare run proves less than
 it looks. Recreate the venv with `python3 -m venv .venv` and
 `.venv/bin/pip install -r requirements.txt` (needs the `python3.14-venv` apt
 package). The venv is for the **server only** — the desktop app and every
@@ -78,6 +78,7 @@ the backend conversion tractable.
 | [mega_empires/credits.py](mega_empires/credits.py) | Colour credits, row-chain discounts, effective Advance purchase price |
 | [mega_empires/sequence.py](mega_empires/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
 | [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
+| [mega_empires/remote.py](mega_empires/remote.py) | `RemoteGameService`: the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
 | [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
 | [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
 | [main.py](main.py) | FastAPI HTTP layer over `GameService`. Thin by design: routes, auth, error mapping, SSE fan-out. **No game logic here** |
@@ -226,13 +227,35 @@ a token in the query string the stream is just a "refetch now" signal and client
 pull `/state` with their token. This also makes "every reconnect pulls a fresh
 snapshot" fall out for free. **Do not put game data on that stream.**
 
-Next: `RemoteGameService` implementing the same interface over HTTP, with the
-Tkinter app polling `/state` on a `root.after()` timer — no SSE client in Tkinter,
-to keep threading out of the desktop app. Phones come last.
+Done also: [mega_empires/remote.py](mega_empires/remote.py) and the desktop app's
+server mode. Set `MEGA_EMPIRES_SERVER` (and `MEGA_EMPIRES_TOKEN`) and `ui.py`
+connects to the box instead of opening a local save; unset, it behaves exactly as
+before. `tests/test_remote.py` drives `RemoteGameService` against a **real uvicorn
+running the real app**, so `remote.py` and `main.py` cannot drift apart unnoticed.
 
-**Known gap:** `get_service()` loads the save once and caches it. A game created or
-replaced on disk after the server started is not picked up; there is no way to
-create a game over HTTP yet.
+Rules that fall out of server mode and must not be undone:
+
+- **`remote.py` is stdlib-only.** httpx exists in the venv but the desktop app
+  must start under bare `python3`; that is what makes the offline fallback real.
+- **The laptop polls, it does not subscribe.** `_poll()` on a `root.after()` timer
+  compares `state_version` and redraws only on change — no SSE client, no threads
+  in Tkinter. A failed poll backs off from 2 s to 15 s, because `urllib` blocks the
+  mainloop and hammering a dead server would freeze the UI.
+- **A lost connection is not a state change.** `ServiceUnavailable` keeps the
+  current view; only `CommandError` subclasses that mean rejection surface as
+  dialogs.
+- **Never auto-retry a `VersionConflict`.** Retrying with the old value overwrites
+  whatever the other device just wrote. `_run_command()` refreshes the view and
+  tells the user instead.
+- **Census input is debounced** (`CENSUS_DEBOUNCE_MS`); without it each keystroke
+  was one request, and typing "45" briefly published 4 to every other client.
+
+Next: the player PWA — cities and census first, advances as a separate decision.
+
+**Known gaps:** `get_service()` loads the save once and caches it, so a game
+replaced on disk needs a service restart. There is no way to create a game over
+HTTP, so "New Game" is disabled in server mode and a game must be seeded onto the
+box as `/var/lib/mega-empires/nykyinen_peli.json`.
 
 **Not yet wired:** commands accept `expected_version` but `ui.py` does not pass it,
 because the desktop app is currently the only writer. Pass it once there is more

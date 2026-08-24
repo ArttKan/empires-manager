@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -13,10 +14,17 @@ if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
 import tkinter as tk
 
 from mega_empires.models import GameState, PlayerState
-from mega_empires.service import LocalGameService
+from mega_empires.remote import RemoteGameService
+from mega_empires.service import (
+    LocalGameService,
+    ServiceUnavailable,
+    VersionConflict,
+)
 from mega_empires.storage import DATA_DIRECTORY_VARIABLE
 from mega_empires.sequence import PHASE_BY_NUMBER
+from mega_empires import ui as ui_module
 from mega_empires.ui import (
+    POLL_BACKOFF_MS,
     CALAMITY_DIALOG_SPECS,
     DEFAULT_RULES_VALUES,
     PHASE_AFFECTING_ADVANCES,
@@ -463,6 +471,139 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         self.app.notebook.select(self.app.ast_tab)
         self.app._on_tab_changed()
         self.assertNotIn("ast", self.app._pending_tabs)
+
+
+class _StubRemote(RemoteGameService):
+    """RemoteGameService, joka ei koske verkkoon.
+
+    Peritään oikeasta luokasta, koska `_poll` ja tilarivi tunnistavat etätilan
+    isinstancella — stub-luokka ohittaisi sen haaran kokonaan.
+    """
+
+    def __init__(self, snapshots) -> None:
+        super().__init__("http://stub.invalid", "token", timeout=0.01)
+        self._snapshots = list(snapshots)
+        self.calls = 0
+
+    def snapshot(self):
+        self.calls += 1
+        value = self._snapshots[min(self.calls - 1, len(self._snapshots) - 1)]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+class RemoteModeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as error:
+            raise unittest.SkipTest(f"no display: {error}")
+        self.root.withdraw()
+        self.app = object.__new__(MegaEmpiresApp)
+        self.app.root = self.root
+        self.app.save_path = None
+        self.app.game = self._game(state_version=1)
+        self.app.service = None
+
+    def tearDown(self) -> None:
+        self.root.destroy()
+
+    @staticmethod
+    def _game(state_version: int = 0, cities: int = 0) -> GameState:
+        return GameState(
+            player_count=2,
+            players=[
+                PlayerState("Minoa", "A", "WEST", cities=cities),
+                PlayerState("Hellas", "C", "WEST"),
+            ],
+            game_mode="WEST",
+            state_version=state_version,
+        )
+
+    def test_poll_redraws_only_when_the_version_changed(self) -> None:
+        same = self._game(state_version=1)
+        self.app.service = _StubRemote([same])
+        redraws = []
+        self.app._refresh_all = lambda: redraws.append(True)
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.assertEqual(redraws, [])
+
+    def test_poll_adopts_a_newer_snapshot(self) -> None:
+        newer = self._game(state_version=9, cities=6)
+        self.app.service = _StubRemote([newer])
+        redraws = []
+        self.app._refresh_all = lambda: redraws.append(True)
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.assertEqual(self.app.game.state_version, 9)
+        self.assertEqual(self.app.game.players[0].cities, 6)
+        self.assertEqual(len(redraws), 1)
+
+    def test_lost_connection_keeps_the_current_view(self) -> None:
+        """Yhteyskatko ei ole pelitilan muutos."""
+
+        self.app.service = _StubRemote([ServiceUnavailable("boom")])
+        self.app._refresh_all = lambda: self.fail("must not redraw")
+        before = self.app.game
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.assertIs(self.app.game, before)
+        self.assertFalse(self.app._connected)
+
+    def test_failed_poll_backs_off(self) -> None:
+        """Estävä urllib + tiheä kysely = jumittunut käyttöliittymä."""
+
+        self.app.service = _StubRemote([ServiceUnavailable("boom")])
+        scheduled = []
+        self.app.root.after = lambda ms, fn=None: scheduled.append(ms)
+
+        self.app._poll()
+
+        self.assertEqual(scheduled, [POLL_BACKOFF_MS])
+
+    def test_version_conflict_refreshes_instead_of_retrying(self) -> None:
+        """Automaattinen uudelleenyritys yliajaisi toisen laitteen muutoksen."""
+
+        self.app.service = _StubRemote([self._game(state_version=5, cities=8)])
+        self.app._refresh_all = lambda: None
+
+        def conflicting():
+            raise VersionConflict(1, 4)
+
+        with mock.patch.object(ui_module.messagebox, "showinfo") as info:
+            accepted = self.app._run_command(conflicting)
+
+        self.assertFalse(accepted)
+        self.assertTrue(info.called)
+        self.assertEqual(self.app.game.state_version, 5)
+
+    def test_census_typing_is_debounced_into_one_command(self) -> None:
+        self.app.service = _StubRemote([self._game()])
+        commits = []
+        self.app._commit_census = lambda player, value: commits.append(value.get())
+        value = tk.StringVar(master=self.root, value="4")
+        player = self.app.game.players[0]
+
+        self.app._schedule_census_commit(player, value)
+        value.set("45")
+        self.app._schedule_census_commit(player, value)
+        self.assertEqual(commits, [])
+
+        self.root.update()
+        deadline = time.monotonic() + 2
+        while not commits and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.02)
+
+        self.assertEqual(commits, ["45"])
 
 
 if __name__ == "__main__":
