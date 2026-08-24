@@ -19,6 +19,11 @@ korvaa työhakemiston sisällön eikä saa hävittää pelejä.
 
 ## Ensimmäinen käyttöönotto
 
+> **Tämä vaihe on tehty.** Pipeline on pystyssä ja push-to-live on todettu
+> toimivaksi oikealla koodimuutoksella. Ohjeet on säilytetty siltä varalta, että
+> palvelin pitää joskus rakentaa uudelleen tyhjästä. Jatkuvaa päivitystä varten
+> katso "Päivitys jatkossa".
+
 Sovellushakemisto on jo olemassa ja sisältää käsin sijoitetun Phase A -skeletonin,
 joka **ei ole gitissä**. Ensimmäinen käyttöönotto on siis muunnos, ei puhdas
 asennus. Vanha hakemisto säilytetään varmuuskopiona kunnes uusi on todettu
@@ -106,7 +111,7 @@ jäisi `master`, jossa skeletonia ei ole, eikä palvelu käynnistyisi.
 
 ```bash
 sudo -u megaempires git clone --branch backend-sekoilu \
-    git@github.com:rautiaik/Mega-Empires.git \
+    git@github.com:ArttKan/mega-empires-manager.git \
     /home/megaempires/mega-empires-backend
 sudo -u megaempires python3 -m venv /home/megaempires/venv
 sudo -u megaempires /home/megaempires/venv/bin/pip install --upgrade pip
@@ -201,6 +206,58 @@ lopulta yhdistetään masteriin:
 ```bash
 BRANCH=master sudo -u megaempires .../deploy.sh
 ```
+
+## systemd-unit on malli, ei elävä konfiguraatio
+
+Repon `deploy/mega-empires-backend.service` on **malli**. Palvelimen kopioon on
+kirjoitettu oikea `ECHO_TOKEN` placeholderin tilalle, ja jotta tuo paikallinen
+muutos ei näy likaisena eikä `git pull` yliaja sitä, checkoutissa on ajettu:
+
+```bash
+git update-index --skip-worktree deploy/mega-empires-backend.service
+```
+
+**Seuraus, joka on syytä muistaa Phase B:ssä:** jos repon malli muuttuu — vaikkapa
+uusi `Environment=`-muuttuja — muutos **ei** päädy palvelimelle pelkällä
+`deploy.sh`-ajolla. Deploy onnistuu ja palvelu käynnistyy, mutta vanhalla
+unitilla. Vika ei näy virheenä vaan väärin toimivana sovelluksena.
+
+Käsin sovittaminen:
+
+```bash
+cd /home/megaempires/mega-empires-backend
+sudo -u megaempires git update-index --no-skip-worktree \
+    deploy/mega-empires-backend.service
+sudo -u megaempires git checkout deploy/mega-empires-backend.service
+sudo -u megaempires git pull
+# Kirjoita oikea ECHO_TOKEN uuteen malliin, sitten:
+sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart mega-empires-backend.service
+sudo -u megaempires git update-index --skip-worktree \
+    deploy/mega-empires-backend.service
+```
+
+### Parempi ratkaisu, jos tämä alkaa haitata
+
+`--skip-worktree` on olemassa vain siksi, että salaisuus on unitin sisällä. Jos
+token siirretään repon ulkopuoliseen tiedostoon, malli muuttuu tavalliseksi
+tiedostoksi jonka `git pull` voi päivittää vapaasti:
+
+```ini
+EnvironmentFile=/etc/mega-empires-backend.env
+```
+
+```bash
+sudo install -m 0600 -o root -g root /dev/null /etc/mega-empires-backend.env
+echo 'ECHO_TOKEN=oikea-token' | sudo tee /etc/mega-empires-backend.env
+sudo -u megaempires git update-index --no-skip-worktree \
+    deploy/mega-empires-backend.service
+```
+
+Tämän jälkeen unit on kokonaan gitin hallinnassa eikä hiljaista eroa repon ja
+palvelimen välillä enää synny. Kannattaa tehdä ennen kuin Phase B lisää lisää
+ympäristömuuttujia.
 
 ## Vianetsintä
 

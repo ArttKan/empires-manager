@@ -136,11 +136,29 @@ Tunnel at `empiresmanager.com` with no inbound ports open. SSH only over
 Tailscale. Game data lives in `/var/lib/mega-empires/` via systemd
 `StateDirectory`, deliberately outside the git checkout.
 
-**Phase A is complete** (tunnel, TLS, systemd, SSE verified from cellular).
+**Phase A and the deploy pipeline are complete and proven.** The box runs a git
+checkout of this repo, and push-to-live has been verified with a real change.
 
-All backend work happens on the `backend-sekoilu` branch; `master` stays untouched
-until the whole chain is proven working. `deploy.sh` defaults to that branch and
-the server checkout tracks it.
+Repo is `git@github.com:ArttKan/mega-empires-manager.git` (an older
+`rautiaik/Mega-Empires` URL is stale). All backend work happens on the
+`backend-sekoilu` branch; `master` stays untouched until the whole chain is proven.
+`deploy.sh` defaults to that branch and the server checkout tracks it.
+
+Deploying is: commit and push here, then on the box over Tailscale SSH run
+`sudo -u megaempires /home/megaempires/mega-empires-backend/deploy/deploy.sh`.
+It fetches, reinstalls dependencies only when `requirements.txt` changed, runs the
+suite, and restarts **only if tests pass** — so a broken push cannot take the live
+service down. On the box the run reports `skipped=1`, because `tests/test_ui.py`
+skips itself where tkinter is absent; that is expected.
+
+**Trap:** `deploy/mega-empires-backend.service` is a *template*. The box's copy has
+the real `ECHO_TOKEN` substituted in and carries
+`git update-index --skip-worktree`, so **changes to that file never reach the box
+via a normal deploy** — the service restarts happily on the old unit and the only
+symptom is wrong runtime behaviour. If Phase B adds an `Environment=` variable,
+reconcile it by hand (see [deploy/README.md](deploy/README.md)), or better, move
+the token into an `EnvironmentFile=` outside the repo so the unit can be tracked
+normally.
 
 **Phase B, not yet started:** extract a `GameService` that owns the `GameState`
 and exposes validated commands instead of letting callers mutate dataclasses;
