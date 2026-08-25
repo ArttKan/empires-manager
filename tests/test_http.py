@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 import main
 from mega_empires.models import GameState, PlayerState
 from mega_empires.service import LocalGameService
+from mega_empires.tokens import TokenStore, tokens_path
 from mega_empires.storage import DATA_DIRECTORY_VARIABLE
 
 TOKEN = "test-token"
@@ -66,6 +67,7 @@ class HttpTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         main.set_service(None)
+        main.set_token_store(None)
         main.TOKEN = self._token
         self._environment.stop()
         self._directory.cleanup()
@@ -223,6 +225,261 @@ class _StubRequest:
     async def is_disconnected(self) -> bool:
         self._calls += 1
         return self._calls > self._limit
+
+
+class ScopeTests(HttpTestCase):
+    """Puhelin saa muuttaa vain omaa riviään ja vain sovituilla komennoilla."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+        self.store = store
+        self.hellas = store.claim(store.join_code, "Hellas", "now")
+        self.player = {"Authorization": f"Bearer {self.hellas}"}
+
+    def test_player_may_change_their_own_row(self) -> None:
+        for route, body in (
+            ("cities", {"value": 4}),
+            ("census", {"value": 20}),
+            ("advances", {"advances": ["pottery"]}),
+        ):
+            response = self.client.post(
+                f"/players/Hellas/{route}", json=body, headers=self.player
+            )
+            self.assertEqual(response.status_code, 200, route)
+
+    def test_player_cannot_touch_another_row(self) -> None:
+        response = self.client.post(
+            "/players/Minoa/cities", json={"value": 9}, headers=self.player
+        )
+
+        self.assertEqual(response.status_code, 403)
+        # Mitään ei saanut muuttua.
+        state = self.client.get("/state", headers=AUTH).json()
+        minoa = [p for p in state["players"] if p["civilization"] == "Minoa"][0]
+        self.assertEqual(minoa["cities"], 0)
+
+    def test_player_cannot_move_their_own_ast_marker(self) -> None:
+        """A.S.T.-askel on kannettavan yksinoikeus."""
+
+        response = self.client.post(
+            "/players/Hellas/ast-step", json={"value": 5}, headers=self.player
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_player_cannot_use_admin_commands(self) -> None:
+        cases = (
+            ("/players/Hellas/ast-bonus", {"value": True}),
+            (
+                "/players/Hellas/details",
+                {
+                    "nickname": "X",
+                    "block": "WEST",
+                    "cities": 1,
+                    "ast_step": 1,
+                    "census": 1,
+                    "ast_bonus": False,
+                },
+            ),
+            ("/turn", {"round_number": 2, "current_phase": 1}),
+            ("/game", {"player_count": 0, "players": []}),
+            ("/echo", {"message": "hi"}),
+        )
+        for path, body in cases:
+            response = self.client.post(path, json=body, headers=self.player)
+            self.assertEqual(response.status_code, 403, path)
+
+    def test_player_may_read_the_whole_state(self) -> None:
+        """Avoimen informaation peli: pistetilanne on TV:llä joka tapauksessa."""
+
+        response = self.client.get("/state", headers=self.player)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["players"]), 3)
+
+    def test_unknown_token_is_401_not_403(self) -> None:
+        response = self.client.post(
+            "/players/Hellas/cities",
+            json={"value": 1},
+            headers={"Authorization": "Bearer garbage"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_admin_is_not_restricted(self) -> None:
+        for path, body in (
+            ("/players/Hellas/ast-step", {"value": 5}),
+            ("/players/Minoa/cities", {"value": 3}),
+        ):
+            self.assertEqual(
+                self.client.post(path, json=body, headers=AUTH).status_code,
+                200,
+                path,
+            )
+
+    def test_new_game_mints_new_tokens(self) -> None:
+        """Vanha puhelintoken ei saa jäädä voimaan uuteen peliin."""
+
+        before = self.store.join_code
+        payload = GameState(
+            player_count=2,
+            players=[
+                PlayerState("Saba", "S", "EAST"),
+                PlayerState("Persia", "P", "EAST"),
+            ],
+            game_mode="EAST",
+        ).to_dict()
+
+        self.client.post("/game", json=payload, headers=AUTH)
+
+        response = self.client.post(
+            "/players/Saba/cities", json={"value": 1}, headers=self.player
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotEqual(main.get_token_store().join_code, before)
+
+
+class JoinFlowTests(HttpTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(self.store)
+        self.code = self.store.join_code
+        main._join_failures.clear()
+
+    def test_roster_needs_the_code(self) -> None:
+        self.assertEqual(
+            self.client.post("/join/roster", json={"code": "NOPE"}).status_code,
+            403,
+        )
+
+    def test_roster_lists_free_and_taken_seats(self) -> None:
+        self.store.claim(self.code, "Hatti", "now")
+
+        body = self.client.post(
+            "/join/roster", json={"code": self.code}
+        ).json()
+
+        self.assertEqual(
+            {p["civilization"]: p["claimed"] for p in body["players"]},
+            {"Minoa": False, "Hatti": True, "Hellas": False},
+        )
+
+    def test_joining_returns_a_working_token(self) -> None:
+        response = self.client.post(
+            "/join", json={"code": self.code, "civilization": "Hellas"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        token = response.json()["token"]
+        write = self.client.post(
+            "/players/Hellas/cities",
+            json={"value": 3},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(write.status_code, 200)
+
+    def test_taken_seat_is_409_not_403(self) -> None:
+        """Varattu paikka on tavallinen tilanne, ei tunkeutumisyritys."""
+
+        self.client.post(
+            "/join", json={"code": self.code, "civilization": "Hellas"}
+        )
+
+        response = self.client.post(
+            "/join", json={"code": self.code, "civilization": "Hellas"}
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_wrong_code_does_not_claim(self) -> None:
+        self.client.post(
+            "/join", json={"code": "NOPE", "civilization": "Hellas"}
+        )
+
+        self.assertFalse(main.get_token_store().is_claimed("Hellas"))
+
+    def test_repeated_wrong_codes_are_rate_limited(self) -> None:
+        """Lyhyt koodi kestää arvailua vain jos yrityksiä rajoitetaan."""
+
+        codes = [
+            self.client.post("/join/roster", json={"code": "NOPE"}).status_code
+            for _ in range(main.JOIN_MAX_FAILURES + 2)
+        ]
+
+        self.assertIn(429, codes)
+        # Oikea koodikaan ei auta ennen kuin ikkuna umpeutuu.
+        self.assertEqual(
+            self.client.post(
+                "/join/roster", json={"code": self.code}
+            ).status_code,
+            429,
+        )
+
+    def test_correct_codes_are_not_counted_against_the_limit(self) -> None:
+        for _ in range(main.JOIN_MAX_FAILURES + 2):
+            response = self.client.post(
+                "/join/roster", json={"code": self.code}
+            )
+            self.assertEqual(response.status_code, 200)
+
+
+class AdminLobbyTests(HttpTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = TokenStore.create(
+            ["Minoa", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(self.store)
+
+    def test_admin_sees_the_code_and_who_joined(self) -> None:
+        self.store.claim(self.store.join_code, "Hellas", "now")
+
+        body = self.client.get("/admin/join", headers=AUTH).json()
+
+        self.assertEqual(body["join_code"], self.store.join_code)
+        self.assertEqual(
+            {p["civilization"]: p["claimed"] for p in body["players"]},
+            {"Minoa": False, "Hellas": True},
+        )
+
+    def test_players_cannot_read_the_lobby(self) -> None:
+        token = self.store.claim(self.store.join_code, "Hellas", "now")
+
+        response = self.client.get(
+            "/admin/join", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_release_lets_the_seat_be_claimed_again(self) -> None:
+        """Puhelimen vaihto ei saa lukita pelaajaa ulos."""
+
+        self.store.claim(self.store.join_code, "Hellas", "now")
+
+        released = self.client.post(
+            "/admin/release", json={"civilization": "Hellas"}, headers=AUTH
+        )
+        rejoin = self.client.post(
+            "/join",
+            json={"code": self.store.join_code, "civilization": "Hellas"},
+        )
+
+        self.assertEqual(released.status_code, 200)
+        self.assertEqual(rejoin.status_code, 200)
+
+    def test_release_of_an_unknown_civilization_is_404(self) -> None:
+        response = self.client.post(
+            "/admin/release", json={"civilization": "Atlantis"}, headers=AUTH
+        )
+
+        self.assertEqual(response.status_code, 404)
 
 
 class CreateGameTests(HttpTestCase):

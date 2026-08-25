@@ -29,6 +29,8 @@ myös säännön "jokainen uudelleenyhteys hakee tuoreen tilannekuvan".
 import asyncio
 import json
 import os
+import secrets
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -46,7 +48,8 @@ from mega_empires.service import (
     UnknownPlayer,
     VersionConflict,
 )
-from mega_empires.storage import default_save_path, load_game
+from mega_empires.storage import data_directory, default_save_path, load_game
+from mega_empires.tokens import Principal, TokenStore, tokens_path
 
 app = FastAPI(title="Mega Empires backend")
 
@@ -55,8 +58,12 @@ app = FastAPI(title="Mega Empires backend")
 TOKEN = os.environ.get("MEGA_EMPIRES_TOKEN") or os.environ.get("ECHO_TOKEN")
 
 HEARTBEAT_SECONDS = 15
+JOIN_MAX_FAILURES = 10
+JOIN_WINDOW_SECONDS = 600
+_join_failures: dict = {}
 
 _service: Optional[LocalGameService] = None
+_tokens: Optional[TokenStore] = None
 _lock = asyncio.Lock()
 _subscribers: "set[asyncio.Queue]" = set()
 
@@ -93,7 +100,39 @@ def set_service(service: Optional[LocalGameService]) -> None:
     _service = service
 
 
-def require_token(authorization: str = Header(default="")) -> None:
+def get_token_store() -> TokenStore:
+    """Lataa tai luo pelaajakohtaiset tokenit.
+
+    Luodaan tarvittaessa nykyisen pelin sivilisaatioista, jotta myös käsin
+    palvelimelle kopioitu peli saa tokenit ilman erillistä askelta.
+    """
+
+    global _tokens
+    if _tokens is None:
+        path = tokens_path(data_directory())
+        store = TokenStore.load(path)
+        if store is None:
+            game = get_service().snapshot()
+            store = TokenStore.create(
+                [player.civilization for player in game.players], path
+            )
+        _tokens = store
+    return _tokens
+
+
+def set_token_store(store: "Optional[TokenStore]") -> None:
+    global _tokens
+    _tokens = store
+
+
+def get_principal(authorization: str = Header(default="")) -> Principal:
+    """Tunnista kutsuja adminiksi tai pelaajaksi.
+
+    401 tarkoittaa "en tiedä kuka olet", 403 "tiedän, mutta et saa". Ne on
+    pidettävä erillään, jotta puhelin osaa erottaa vanhentuneen tokenin
+    väärään riviin koskemisesta.
+    """
+
     if not TOKEN:
         # Sulkeudu, älä avaudu: konfiguroimaton token ei saa tarkoittaa
         # tunnistautumatonta pääsyä.
@@ -102,8 +141,38 @@ def require_token(authorization: str = Header(default="")) -> None:
         )
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    if authorization[len("Bearer "):].strip() != TOKEN:
+    token = authorization[len("Bearer "):].strip()
+
+    try:
+        store = get_token_store()
+    except HTTPException:
+        # Peliä ei ole, joten pelaajatokeneita ei voi olla. Admin kelpaa yhä.
+        if token and TOKEN and secrets.compare_digest(token, TOKEN):
+            return Principal("admin")
         raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+    principal = store.principal_for(token, TOKEN)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+    return principal
+
+
+def authorize(principal: Principal, civilization: str, command: str) -> None:
+    if not principal.may_command(civilization, command):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"A player token for {principal.civilization or '?'} cannot "
+                f"change {command} for {civilization}."
+            ),
+        )
+
+
+def require_admin(principal: Principal) -> None:
+    if not principal.is_admin:
+        raise HTTPException(
+            status_code=403, detail="This action requires the admin token."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -211,13 +280,25 @@ async def health() -> dict:
     }
 
 
-@app.get("/state", dependencies=[Depends(require_token)])
-async def state() -> dict:
+@app.get("/state")
+async def state(principal: Principal = Depends(get_principal)) -> dict:
+    """Koko pelitila. Luettavissa myös pelaajatokenilla.
+
+    Peli on avoimen informaation peli — pistetilanne on TV:llä kaikkien
+    nähtävissä — joten rivien piilottaminen puhelimilta ei suojaisi mitään.
+    Kirjoitusoikeus on eri asia ja rajattu erikseen.
+    """
+
     return get_service().snapshot().to_dict()
 
 
-@app.post("/players/{civilization}/cities", dependencies=[Depends(require_token)])
-async def set_cities(civilization: str, body: IntValue) -> dict:
+@app.post("/players/{civilization}/cities")
+async def set_cities(
+    civilization: str,
+    body: IntValue,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    authorize(principal, civilization, "cities")
     service = get_service()
     return await execute(
         lambda: service.set_cities(
@@ -226,8 +307,13 @@ async def set_cities(civilization: str, body: IntValue) -> dict:
     )
 
 
-@app.post("/players/{civilization}/census", dependencies=[Depends(require_token)])
-async def set_census(civilization: str, body: IntValue) -> dict:
+@app.post("/players/{civilization}/census")
+async def set_census(
+    civilization: str,
+    body: IntValue,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    authorize(principal, civilization, "census")
     service = get_service()
     return await execute(
         lambda: service.set_census(
@@ -236,8 +322,13 @@ async def set_census(civilization: str, body: IntValue) -> dict:
     )
 
 
-@app.post("/players/{civilization}/ast-step", dependencies=[Depends(require_token)])
-async def set_ast_step(civilization: str, body: IntValue) -> dict:
+@app.post("/players/{civilization}/ast-step")
+async def set_ast_step(
+    civilization: str,
+    body: IntValue,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     service = get_service()
     return await execute(
         lambda: service.set_ast_step(
@@ -246,8 +337,13 @@ async def set_ast_step(civilization: str, body: IntValue) -> dict:
     )
 
 
-@app.post("/players/{civilization}/ast-bonus", dependencies=[Depends(require_token)])
-async def set_ast_bonus(civilization: str, body: BoolValue) -> dict:
+@app.post("/players/{civilization}/ast-bonus")
+async def set_ast_bonus(
+    civilization: str,
+    body: BoolValue,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     service = get_service()
     return await execute(
         lambda: service.set_ast_bonus(
@@ -256,8 +352,13 @@ async def set_ast_bonus(civilization: str, body: BoolValue) -> dict:
     )
 
 
-@app.post("/players/{civilization}/advances", dependencies=[Depends(require_token)])
-async def set_advances(civilization: str, body: AdvancesBody) -> dict:
+@app.post("/players/{civilization}/advances")
+async def set_advances(
+    civilization: str,
+    body: AdvancesBody,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    authorize(principal, civilization, "advances")
     service = get_service()
     return await execute(
         lambda: service.set_advances(
@@ -270,8 +371,13 @@ async def set_advances(civilization: str, body: AdvancesBody) -> dict:
     )
 
 
-@app.post("/players/{civilization}/details", dependencies=[Depends(require_token)])
-async def set_player_details(civilization: str, body: DetailsBody) -> dict:
+@app.post("/players/{civilization}/details")
+async def set_player_details(
+    civilization: str,
+    body: DetailsBody,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     service = get_service()
     return await execute(
         lambda: service.set_player_details(
@@ -288,8 +394,12 @@ async def set_player_details(civilization: str, body: DetailsBody) -> dict:
     )
 
 
-@app.post("/turn", dependencies=[Depends(require_token)])
-async def set_turn(body: TurnBody) -> dict:
+@app.post("/turn")
+async def set_turn(
+    body: TurnBody,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     service = get_service()
     return await execute(
         lambda: service.set_turn(
@@ -301,8 +411,12 @@ async def set_turn(body: TurnBody) -> dict:
     )
 
 
-@app.post("/game", dependencies=[Depends(require_token)])
-async def create_game(payload: dict) -> dict:
+@app.post("/game")
+async def create_game(
+    payload: dict,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     """Asenna uusi peli ja korvaa nykyinen.
 
     Työpöytäsovelluksen uuden pelin velho tuottaa valmiin `GameState`-rakenteen,
@@ -332,14 +446,152 @@ async def create_game(payload: dict) -> dict:
         service = LocalGameService(game, save_path=path)
         service.save()
         set_service(service)
+        # Uusi peli, uudet tokenit ja uusi liittymiskoodi: pelaajat vaihtavat
+        # sivilisaatiota pelien välillä, joten vanhojen kantaminen mukana
+        # osuisi useammin väärin kuin oikein.
+        set_token_store(
+            TokenStore.create(
+                [player.civilization for player in game.players],
+                tokens_path(data_directory()),
+            )
+        )
         version = service.snapshot().state_version
 
     await broadcast(version)
     return {"state_version": version, "player_count": game.player_count}
 
 
-@app.post("/echo", dependencies=[Depends(require_token)])
-async def echo(body: EchoBody) -> dict:
+class JoinBody(BaseModel):
+    code: str
+    civilization: str = ""
+
+
+class ReleaseBody(BaseModel):
+    civilization: str
+
+
+def _client_key(request: Request) -> str:
+    # Cloudflare-tunnelin takana request.client on aina 127.0.0.1, joten
+    # oikea osoite luetaan edgen otsakkeesta kun se on saatavilla.
+    return (
+        request.headers.get("cf-connecting-ip")
+        or (request.client.host if request.client else "unknown")
+    )
+
+
+def _check_join_rate(request: Request) -> None:
+    """Rajoita väärien koodien arvailua.
+
+    Liittymiskoodi on lyhyt, koska se luetaan ääneen. Se kestää arvailua vain
+    jos yrityksiä rajoitetaan.
+    """
+
+    key = _client_key(request)
+    now = time.monotonic()
+    attempts = [
+        stamp
+        for stamp in _join_failures.get(key, [])
+        if now - stamp < JOIN_WINDOW_SECONDS
+    ]
+    _join_failures[key] = attempts
+    if len(attempts) >= JOIN_MAX_FAILURES:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many attempts. Wait a few minutes and try again.",
+        )
+
+
+def _record_join_failure(request: Request) -> None:
+    _join_failures.setdefault(_client_key(request), []).append(
+        time.monotonic()
+    )
+
+
+@app.post("/join/roster")
+async def join_roster(body: JoinBody, request: Request) -> dict:
+    """Kerro mitkä paikat ovat vapaana. Koodi vaaditaan jo tähän.
+
+    Ilman koodia kuka tahansa domainin löytänyt näkisi pelin kokoonpanon ja
+    voisi seurata milloin paikkoja vapautuu.
+    """
+
+    _check_join_rate(request)
+    store = get_token_store()
+    if body.code.strip().upper() != store.join_code:
+        _record_join_failure(request)
+        raise HTTPException(status_code=403, detail="Wrong join code.")
+    return {
+        "players": [
+            {"civilization": name, "claimed": claimed}
+            for name, claimed in store.status()
+        ]
+    }
+
+
+@app.post("/join")
+async def join(body: JoinBody, request: Request) -> dict:
+    """Varaa sivilisaatio ja palauta sen token."""
+
+    _check_join_rate(request)
+    store = get_token_store()
+    try:
+        token = store.claim(
+            body.code,
+            body.civilization,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+    except ValueError as error:
+        message = str(error)
+        if "join code" in message:
+            _record_join_failure(request)
+            raise HTTPException(status_code=403, detail=message)
+        # Väärä koodi ja varattu paikka on erotettava toisistaan: jälkimmäinen
+        # on tavallinen tilanne pöydässä, ei tunkeutumisyritys.
+        raise HTTPException(status_code=409, detail=message)
+    return {"token": token, "civilization": body.civilization}
+
+
+@app.get("/admin/join")
+async def admin_join(principal: Principal = Depends(get_principal)) -> dict:
+    """Liittymiskoodi ja kuka on jo mukana. Kannettavan aulanäkymää varten."""
+
+    require_admin(principal)
+    store = get_token_store()
+    return {
+        "join_code": store.join_code,
+        "players": [
+            {"civilization": name, "claimed": claimed}
+            for name, claimed in store.status()
+        ],
+    }
+
+
+@app.post("/admin/release")
+async def admin_release(
+    body: ReleaseBody,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    """Vapauta paikka uudelleen varattavaksi.
+
+    Tarvitaan kun puhelin vaihtuu tai selaimen tiedot tyhjenevät: muuten
+    pelaaja lukittuisi ulos omasta rivistään kesken pelin.
+    """
+
+    require_admin(principal)
+    store = get_token_store()
+    try:
+        store.release(body.civilization)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    return {"civilization": body.civilization, "claimed": False}
+
+
+@app.post("/echo")
+async def echo(
+    body: EchoBody,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    require_admin(principal)
     """Phase A:n yhteystesti. Säilytetty, koska deploy-ohje käyttää sitä."""
 
     return {
