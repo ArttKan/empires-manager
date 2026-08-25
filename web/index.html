@@ -54,6 +54,10 @@
   .me .civ { font-size: 2rem; font-weight: 700; line-height: 1.1; }
   .me .who { color: var(--muted); font-size: .95rem; margin-top: 2px; }
   .me .score { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
+  .me .rank {
+    font-size: 2.4rem; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
   .me .total { font-size: 2.4rem; font-weight: 700; color: var(--accent); }
   .me .parts { color: var(--muted); font-size: .85rem; }
   .control { background: var(--panel); border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
@@ -147,6 +151,7 @@
       <div class="civ" id="play-civ">—</div>
       <div class="who" id="play-who"></div>
       <div class="score">
+        <span class="rank" id="play-rank">—</span>
         <span class="total" id="play-total">0</span>
         <span class="parts" id="play-parts"></span>
       </div>
@@ -169,7 +174,7 @@
     <div class="control">
       <div class="label">Civilization Advances</div>
       <div id="adv-summary" class="stepper" style="font-size:1.1rem">—</div>
-      <button id="adv-open" class="secondary" style="margin-top:12px">Edit Advances</button>
+      <button id="adv-open" class="secondary" style="margin-top:12px">Buy Advances</button>
     </div>
 
     <div class="standings" id="standings"></div>
@@ -348,7 +353,7 @@ async function refresh() {
     bar(saved.civilization + " is not in this game", "bad");
     return;
   }
-  bar("Turn " + body.round_number + " · phase " + body.current_phase);
+  bar("Turn " + body.round_number + " · Phase " + body.current_phase);
   render();
 }
 
@@ -357,10 +362,14 @@ function render() {
   el("play-who").textContent = me.nickname
     ? me.nickname + " · " + me.block
     : me.block;
+  el("play-rank").textContent = me.rank + ".";
   el("play-total").textContent = me.score.total;
+  // "7 advances" luki aiemmin pisteitä, ei kortteja. Erittely kertoo nyt
+  // kummankin luvun erikseen, jottei niitä voi sekoittaa.
   el("play-parts").textContent =
-    "#" + me.rank + "   " + me.score.cities + " cities + " +
-    me.score.ast + " A.S.T. + " + me.score.advances + " advances" +
+    me.score.cities + " from cities + " +
+    me.score.ast + " from A.S.T. + " +
+    me.score.advances + " points from " + me.advances.length + " advances" +
     (me.score.bonus ? " + " + me.score.bonus + " bonus" : "");
   el("cities-value").textContent = me.cities;
 
@@ -383,7 +392,7 @@ function renderStandings() {
     const row = document.createElement("div");
     row.className = "row" + (player.civilization === me.civilization ? " self" : "");
     row.innerHTML =
-      `<span class="rank">${player.rank}</span>` +
+      `<span class="rank">${player.rank}.</span>` +
       `<span>${player.civilization}${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
       `<span class="pts">${player.score.total}</span>`;
     box.appendChild(row);
@@ -479,6 +488,7 @@ const GROUP_LABELS = {
 };
 
 let catalogue = null;
+let ordered = [];   // näyttöjärjestys: omistetut ensin, lukittu avaushetkellä
 let selection = null;   // muokattava valinta; tallennetaan vasta Savella
 
 async function openAdvances() {
@@ -494,6 +504,14 @@ async function openAdvances() {
   }
   catalogue = body;
   selection = new Set(body.advances.filter((a) => a.owned).map((a) => a.id));
+  // Järjestys lasketaan kerran avattaessa eikä jokaisella napautuksella: muuten
+  // kortti hyppäisi listan alkuun juuri kun siihen koskee ja seuraava
+  // napautettava siirtyisi sormen alta. Ryhmien sisällä säilyy
+  // referenssitaulukon järjestys.
+  ordered = [
+    ...body.advances.filter((a) => a.owned),
+    ...body.advances.filter((a) => !a.owned),
+  ];
   renderAdvances();
   show("advances");
   window.scrollTo(0, 0);
@@ -520,7 +538,7 @@ function renderAdvances() {
 
   const list = el("adv-list");
   list.innerHTML = "";
-  for (const advance of catalogue.advances) {
+  for (const advance of ordered) {
     const chosen = selection.has(advance.id);
     const button = document.createElement("button");
     button.className = "adv" + (chosen ? " owned" : "");
