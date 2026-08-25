@@ -16,7 +16,13 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   }
-  .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  /* 100dvh eikä 100vh: dvh seuraa osoiterivin liukumista, jolloin palkki ei
+     jää sen alle eikä hyppää sisään ja ulos. */
+  .wrap {
+    max-width: 560px; margin: 0 auto; padding: 20px 16px 0;
+    min-height: 100dvh; display: flex; flex-direction: column;
+  }
+  .wrap > section { padding-bottom: 24px; }
   h1 { font-size: 1.4rem; margin: 8px 0 4px; }
   p.sub { color: var(--muted); margin: 0 0 24px; font-size: .95rem; }
   label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
@@ -118,15 +124,16 @@
   }
   .adv-head button { width: auto; margin: 0; padding: 12px 18px; }
   /* ── välilehdet ───────────────────────────────────────────── */
-  body.tabbed { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .tabs {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-    display: flex; background: var(--panel);
-    border-top: 1px solid #344258;
-    padding-bottom: env(safe-area-inset-bottom);
+    position: sticky; bottom: 0; z-index: 10;
+    display: flex; margin: auto -16px 0;
+    background: var(--panel); border-top: 1px solid #344258;
   }
   .tabs button {
-    flex: 1; margin: 0; border-radius: 0; padding: 16px 8px;
+    flex: 1; margin: 0; border-radius: 0;
+    /* Kotipainikkeen turva-alue kuuluu napin sisään, ei sen alle: erillisenä
+       täytteenä se näkyi tyhjänä palkkina painikkeiden alapuolella. */
+    padding: 16px 8px calc(16px + env(safe-area-inset-bottom));
     background: transparent; color: var(--muted);
     font-size: .95rem; font-weight: 600;
   }
@@ -212,7 +219,6 @@
       <button id="adv-open" class="secondary" style="margin-top:12px">Buy Advances</button>
     </div>
 
-    <button id="leave" class="secondary">Leave this device</button>
     <div id="play-msg" class="msg hidden"></div>
   </section>
 
@@ -240,7 +246,7 @@
   </section>
 
   <nav class="tabs hidden" id="tabs">
-    <button id="tab-me" class="active">My row</button>
+    <button id="tab-me" class="active">—</button>
     <button id="tab-board">Scoreboard</button>
   </nav>
 
@@ -259,7 +265,6 @@ const show = (id) => {
   // välilehden vaihtaminen hukkaisi valinnat.
   const tabbed = TABBED.includes(id);
   el("tabs").classList.toggle("hidden", !tabbed);
-  document.body.classList.toggle("tabbed", tabbed);
   if (tabbed) {
     el("tab-me").classList.toggle("active", id === "play");
     el("tab-board").classList.toggle("active", id === "board");
@@ -418,6 +423,7 @@ function render() {
   el("play-who").textContent = me.nickname
     ? me.nickname + " · " + me.block
     : me.block;
+  el("tab-me").textContent = me.civilization;
   el("play-rank").textContent = me.rank + ".";
   el("play-total").textContent = me.score.total;
   // "7 advances" luki aiemmin pisteitä, ei kortteja. Erittely kertoo nyt
@@ -563,6 +569,7 @@ function enterGame() {
   const saved = session.read();
   if (!saved) { show("join-code"); return; }
   el("play-civ").textContent = saved.civilization;
+  el("tab-me").textContent = saved.civilization;
   show("play");
   refresh();
   listen();
@@ -719,13 +726,6 @@ el("code").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitCode();
 });
 el("seat-back").onclick = () => { show("join-code"); };
-el("leave").onclick = () => {
-  if (confirm("Leave this device? You will need the game code to join again.")) {
-    session.clear();
-    show("join-code");
-  }
-};
-
 // Tallennettu istunto vie suoraan pelinäkymään, joten puhelimen lukitus tai
 // selaimen sulkeminen ei vaadi uutta liittymistä.
 if (session.read()) { enterGame(); } else { show("join-code"); }

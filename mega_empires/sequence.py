@@ -202,11 +202,10 @@ PHASES = (
 
 PHASE_BY_NUMBER = {phase.number: phase for phase in PHASES}
 
-# Census lasketaan laudalta vaiheessa 2 ja kulutetaan vaiheessa 3 Movementin
-# järjestykseen. Muissa vaiheissa luku ei ole ajan tasalla eikä sitä käytetä,
-# joten puhelimelta sen muuttaminen on todennäköisemmin virhe kuin kirjaus.
+# Census lasketaan laudalta vaiheessa 2. Vaihe 3 kuluttaa luvun Movementin
+# järjestykseen, mutta ei muuta sitä, joten kirjausikkuna on vain vaihe 2.
 # Kannettavaa tämä ei koske: pelinjohtajan on voitava korjata tieto milloin vain.
-CENSUS_PHASES = frozenset({2, 3})
+CENSUS_PHASES = frozenset({2})
 
 # Advance-kortit ostetaan vaiheessa 12. Muissa vaiheissa puhelimelta tehty
 # muutos on käytännössä aina vahinko — koko korttivalikoima kirjoitetaan

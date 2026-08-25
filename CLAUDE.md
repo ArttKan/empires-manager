@@ -39,8 +39,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 203 tests
-python3 -m unittest discover -v             # 144 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 223 tests
+python3 -m unittest discover -v             # 148 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
@@ -283,24 +283,51 @@ checkout and the test suite still run offline.
   reads would otherwise destroy a live game permanently. The log moves with its
   game — leaving it behind would splice two games into one audit trail.
 
-Next: the player PWA. Blocked on authorization — there is currently **one shared
-token with full authority**, so handing it to phones would let every player edit
-every row, which is worse than the single-operator status quo. Per-civilization
-tokens and field-level scoping come first, then a `/join` claim flow (a typed URL
-behind a spoken game code — QR would need a non-stdlib dependency), then the page
-itself: cities and census, own row only.
+**Phase C, mostly built.** [web/index.html](web/index.html) is the player app,
+served at `/` so the only thing read aloud at the table is the bare domain. One
+page, three states, switching on whether `localStorage` holds a token: code entry,
+seat picker, then the player's own row with a Scoreboard tab.
 
-**Known gap:** `get_service()` caches the loaded save, so a game replaced *on disk*
-still needs a restart — `POST /game` is the supported way to change games and does
-not.
+- **Authorization is per civilization.** [mega_empires/tokens.py](mega_empires/tokens.py)
+  mints a token per civilization plus one join code, in a **separate `tokens.json`,
+  never in `GameState`** — putting secrets there would copy them into every save,
+  the command log directory, and the laptop's mirror. Written `0600`, compared with
+  `secrets.compare_digest`.
+- **Phones may change cities, census and advances on their own row only.** A.S.T.
+  step, bonus, details, turn and new game are admin-only. 401 means "unknown
+  token", 403 means "known but not allowed" — the phone needs to tell those apart.
+- **`/join` is gated by a spoken code** and rate limited (10 failures per 10
+  minutes per IP, read from `CF-Connecting-IP` since everything arrives from the
+  tunnel as 127.0.0.1). A wrong code is 403 and counts; an already-claimed seat is
+  409 and does not — a seat clash is a table mix-up, not an intrusion.
+- **Seats are claimed exclusively.** Phone swaps, cleared browsers and dead
+  batteries are handled by `POST /admin/release` from the laptop. There is
+  deliberately **no player-side "leave"**: a button that releases your own seat
+  can strand you mid-game, and every real case is involuntary anyway.
+- **A new game mints new tokens and a new join code.** Players change civilization
+  between games, so carrying tokens over would be wrong more often than right.
+- **Phase gates** live in `sequence.PHASE_GATED_COMMANDS`: census in phase 2,
+  advances in phase 12, cities ungated (it changes through conflict and calamities
+  too, so a narrow window would block more corrections than it prevents mistakes).
+  **Admin bypasses every gate** — the game master must be able to fix data without
+  stepping the game backwards. `/state` reports the gates so the phone does not
+  hold a second copy of the rule.
+- **Scores and Advance prices are computed server-side** and returned by `/state`
+  and `GET /players/{civ}/advances`. Reimplementing the VP bands or the colour
+  credits and row-chain discounts in JavaScript would duplicate `scoring.py` and
+  `credits.py`, and the two would drift silently until someone disputed a score.
+- **Advance selections are held locally until Save**, and the list order is fixed
+  when the sheet opens — re-sorting on every tap would move the next card out from
+  under the player's thumb.
 
-**Not yet wired:** commands accept `expected_version` but `ui.py` does not pass it,
-because the desktop app is currently the only writer. Pass it once there is more
-than one.
+Remaining: the manifest and service worker for home-screen install, and the lobby
+view in the desktop app (join code and claim status on the TV, release a seat).
 
-**Phase C, not designed:** browser TV display and a player PWA. Mobile browsers
-drop SSE when the screen locks, so every client reconnect must pull a full fresh
-snapshot rather than assuming it missed nothing.
+**No browser TV display.** The laptop drives the TV with the Tkinter views, which
+removed the largest piece of Phase C. Mobile browsers drop SSE when the screen
+locks, so the phone refetches on `visibilitychange` and on a 15 s fallback poll as
+well as on the stream — the stream alone would leave stale numbers after every
+unlock.
 
 FastAPI + uvicorn is the intended server stack. This breaks the project's former
 stdlib-only rule, which was a deliberate decision — but the **desktop app and all

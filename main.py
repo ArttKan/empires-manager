@@ -183,7 +183,7 @@ def authorize(principal: Principal, civilization: str, command: str) -> None:
 
 
 PHASE_LABELS = {
-    "census": "Census is counted in phase 2 and used in phase 3",
+    "census": "Census is counted in phase 2",
     "advances": "Civilization Advances are bought in phase 12",
 }
 

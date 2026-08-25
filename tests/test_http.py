@@ -470,7 +470,7 @@ class ScopeTests(HttpTestCase):
             )
 
     def test_census_is_editable_only_in_its_own_phases(self) -> None:
-        """Census lasketaan vaiheessa 2 ja kulutetaan vaiheessa 3."""
+        """Census lasketaan laudalta vain vaiheessa 2."""
 
         allowed, blocked = [], []
         for phase in range(1, 14):
@@ -486,8 +486,8 @@ class ScopeTests(HttpTestCase):
             ).status_code
             (allowed if status == 200 else blocked).append(phase)
 
-        self.assertEqual(allowed, [2, 3])
-        self.assertEqual(len(blocked), 11)
+        self.assertEqual(allowed, [2])
+        self.assertEqual(len(blocked), 12)
 
     def test_blocked_census_does_not_change_anything(self) -> None:
         self.client.post(
@@ -525,7 +525,7 @@ class ScopeTests(HttpTestCase):
         body = self.client.get("/state", headers=AUTH).json()
 
         self.assertEqual(
-            body["phase_gates"], {"census": [2, 3], "advances": [12]}
+            body["phase_gates"], {"census": [2], "advances": [12]}
         )
         self.assertNotIn("cities", body["phase_gates"])
 
