@@ -66,7 +66,13 @@
   .hidden { display: none; }
 
   /* ── oma rivi ─────────────────────────────────────────────── */
-  .me { background: var(--panel); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  /* Väri komponentista. Sitä käytetään reunuksena eikä tekstin värinä, koska
+     osa sivilisaatioista on hyvin vaaleita (Iberia, Egypt) ja osa tummia
+     (Kushan, Parthia) — kumpikaan ei erotu luotettavasti tekstinä. */
+  .me {
+    background: var(--panel); border-radius: 12px; padding: 18px;
+    margin-bottom: 16px; border-left: 8px solid transparent;
+  }
   .me .civ { font-size: 2rem; font-weight: 700; line-height: 1.1; }
   .me .who { color: var(--muted); font-size: .95rem; margin-top: 2px; }
   .me .score { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
@@ -157,6 +163,10 @@
 
   /* ── pistetaulu ───────────────────────────────────────────── */
   .board { background: var(--panel); border-radius: 12px; padding: 6px 0; }
+  .board .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block; margin-right: 7px; vertical-align: baseline;
+  }
   .board .row {
     display: grid;
     grid-template-columns: 30px minmax(0, 1fr) 38px 44px 46px;
@@ -367,7 +377,9 @@ function renderSeats(players) {
     button.className = "seat";
     button.disabled = player.claimed;
     button.innerHTML =
-      `<span class="name">${player.civilization}</span>` +
+      `<span class="name">` +
+        `<span class="swatch" style="background:${player.color}"></span>` +
+        `${player.civilization}</span>` +
       (player.claimed ? `<span class="taken">taken</span>` : "");
     button.onclick = () => claim(player.civilization);
     box.appendChild(button);
@@ -457,6 +469,7 @@ async function refresh() {
 
 function render() {
   el("play-civ").textContent = me.civilization;
+  document.querySelector("#play .me").style.borderLeftColor = me.color;
   el("play-who").textContent = me.nickname
     ? me.nickname + " · " + me.block
     : me.block;
@@ -524,7 +537,9 @@ function renderBoard() {
       "row" + (me && player.civilization === me.civilization ? " self" : "");
     row.innerHTML =
       `<span class="rank">${player.rank}.</span>` +
-      `<span class="nm">${player.civilization}` +
+      `<span class="nm">` +
+        `<span class="dot" style="background:${player.color}"></span>` +
+        `${player.civilization}` +
         `${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
       `<span class="num">${player.cities}</span>` +
       `<span class="num">${player.census}</span>` +

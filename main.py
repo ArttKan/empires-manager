@@ -47,7 +47,7 @@ from mega_empires.credits import (
     discount_advances,
     flexible_credit_entitlement,
 )
-from mega_empires.data import ADVANCES
+from mega_empires.data import ADVANCES, CIVILIZATION_BY_NAME
 from mega_empires.models import GameState
 from mega_empires.scoring import calculate_score, visible_rankings
 from mega_empires.sequence import PHASE_GATED_COMMANDS
@@ -352,6 +352,11 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
             "total": score.total,
         }
         entry["rank"] = rankings[player.civilization]
+        # Värit tulevat pelikomponentista (data.py). Asiakas ei saa arvata
+        # niitä: pöydässä pelaaja tunnistaa itsensä juuri väristä.
+        civilization = CIVILIZATION_BY_NAME[player.civilization]
+        entry["color"] = civilization.color
+        entry["text_color"] = civilization.text_color
     data["phase_gates"] = {
         command: sorted(phases)
         for command, phases in PHASE_GATED_COMMANDS.items()
@@ -676,7 +681,11 @@ async def join_roster(body: JoinBody, request: Request) -> dict:
         raise HTTPException(status_code=403, detail="Wrong join code.")
     return {
         "players": [
-            {"civilization": name, "claimed": claimed}
+            {
+                "civilization": name,
+                "claimed": claimed,
+                "color": CIVILIZATION_BY_NAME[name].color,
+            }
             for name, claimed in store.status()
         ]
     }

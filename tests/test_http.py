@@ -134,6 +134,16 @@ class StateTests(HttpTestCase):
         self.assertEqual(hellas["score"]["total"], 26)
         self.assertEqual(hellas["rank"], 1)
 
+    def test_state_carries_component_colours(self) -> None:
+        """Väri tulee pelikomponentista; asiakas ei saa arvata sitä."""
+
+        players = self.client.get("/state", headers=AUTH).json()["players"]
+        by_name = {p["civilization"]: p for p in players}
+
+        self.assertEqual(by_name["Hellas"]["color"], "#e5dd1e")
+        self.assertEqual(by_name["Hellas"]["text_color"], "#101010")
+        self.assertEqual(by_name["Minoa"]["color"], "#70b62c")
+
     def test_tied_players_share_a_rank(self) -> None:
         players = self.client.get("/state", headers=AUTH).json()["players"]
 
@@ -786,6 +796,15 @@ class JoinFlowTests(HttpTestCase):
             {p["civilization"]: p["claimed"] for p in body["players"]},
             {"Minoa": False, "Hatti": True, "Hellas": False},
         )
+
+    def test_roster_carries_colours_for_the_seat_list(self) -> None:
+        body = self.client.post(
+            "/join/roster", json={"code": self.code}
+        ).json()
+
+        colours = {p["civilization"]: p["color"] for p in body["players"]}
+        self.assertEqual(colours["Hellas"], "#e5dd1e")
+        self.assertEqual(colours["Minoa"], "#70b62c")
 
     def test_joining_returns_a_working_token(self) -> None:
         response = self.client.post(
