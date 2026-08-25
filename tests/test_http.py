@@ -806,6 +806,36 @@ class JoinFlowTests(HttpTestCase):
         self.assertEqual(colours["Hellas"], "#e5dd1e")
         self.assertEqual(colours["Minoa"], "#70b62c")
 
+    def test_roster_shows_the_setup_nickname(self) -> None:
+        """Nimi on vahvin tunniste juuri siinä hetkessä kun paikka valitaan."""
+
+        self.client.post(
+            "/players/Hellas/details",
+            json={
+                "nickname": "Matti",
+                "block": "WEST",
+                "cities": 0,
+                "ast_step": 0,
+                "census": 0,
+                "ast_bonus": False,
+            },
+            headers=AUTH,
+        )
+
+        body = self.client.post(
+            "/join/roster", json={"code": self.code}
+        ).json()
+
+        names = {p["civilization"]: p["nickname"] for p in body["players"]}
+        self.assertEqual(names["Hellas"], "Matti")
+        self.assertEqual(names["Minoa"], "A")
+
+    def test_lobby_shows_nicknames_too(self) -> None:
+        body = self.client.get("/admin/join", headers=AUTH).json()
+
+        names = {p["civilization"]: p["nickname"] for p in body["players"]}
+        self.assertEqual(names["Hellas"], "C")
+
     def test_joining_returns_a_working_token(self) -> None:
         response = self.client.post(
             "/join", json={"code": self.code, "civilization": "Hellas"}

@@ -379,8 +379,9 @@ function renderSeats(players) {
     button.innerHTML =
       `<span class="name">` +
         `<span class="swatch" style="background:${player.color}"></span>` +
-        `${player.civilization}</span>` +
-      (player.claimed ? `<span class="taken">taken</span>` : "");
+        `${player.civilization}` +
+        `${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
+      (player.claimed ? `<span class="taken">claimed</span>` : "");
     button.onclick = () => claim(player.civilization);
     box.appendChild(button);
   }

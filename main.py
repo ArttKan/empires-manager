@@ -666,6 +666,20 @@ def _record_join_failure(request: Request) -> None:
     )
 
 
+def _nicknames() -> dict:
+    """Sivilisaatio -> pelin perustuksessa annettu nimi.
+
+    Paikan valinta on juuri se hetki jolloin väärä rivi valitaan, joten
+    nimi näytetään värin rinnalla: se on vahvin tunniste pöydässä.
+    """
+
+    try:
+        game = get_service().snapshot()
+    except HTTPException:
+        return {}
+    return {player.civilization: player.nickname for player in game.players}
+
+
 @app.post("/join/roster")
 async def join_roster(body: JoinBody, request: Request) -> dict:
     """Kerro mitkä paikat ovat vapaana. Koodi vaaditaan jo tähän.
@@ -679,12 +693,14 @@ async def join_roster(body: JoinBody, request: Request) -> dict:
     if body.code.strip().upper() != store.join_code:
         _record_join_failure(request)
         raise HTTPException(status_code=403, detail="Wrong join code.")
+    nicknames = _nicknames()
     return {
         "players": [
             {
                 "civilization": name,
                 "claimed": claimed,
                 "color": CIVILIZATION_BY_NAME[name].color,
+                "nickname": nicknames.get(name, ""),
             }
             for name, claimed in store.status()
         ]
@@ -720,10 +736,15 @@ async def admin_join(principal: Principal = Depends(get_principal)) -> dict:
 
     require_admin(principal)
     store = get_token_store()
+    nicknames = _nicknames()
     return {
         "join_code": store.join_code,
         "players": [
-            {"civilization": name, "claimed": claimed}
+            {
+                "civilization": name,
+                "claimed": claimed,
+                "nickname": nicknames.get(name, ""),
+            }
             for name, claimed in store.status()
         ],
     }
