@@ -27,6 +27,7 @@ myös säännön "jokainen uudelleenyhteys hakee tuoreen tilannekuvan".
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import secrets
@@ -791,9 +792,14 @@ async def player_app() -> HTMLResponse:
     sovellus on yksi tiedosto, se tarkoittaa koko sovellusta.
     """
 
+    html = (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8")
+    build = hashlib.sha256(html.encode("utf-8")).hexdigest()[:8]
     return HTMLResponse(
-        (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-store, must-revalidate"},
+        html.replace("{{BUILD}}", build),
+        headers={
+            "Cache-Control": "no-store, must-revalidate",
+            "X-Build": build,
+        },
     )
 
 
