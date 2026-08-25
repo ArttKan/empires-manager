@@ -342,6 +342,9 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
     # JavaScriptissä, ja ne ehtisivät erkaantua ennen kuin kukaan huomaa —
     # riita pistetilanteesta pöydässä on huono paikka löytää se.
     rankings = visible_rankings(game.players)
+    # Ladataan luomatta: lukupyyntö ei saa luoda tokeneita sivuvaikutuksena.
+    store = TokenStore.load(tokens_path(data_directory()))
+    claims = dict(store.status()) if store is not None else {}
     for entry, player in zip(data["players"], game.players):
         score = calculate_score(player)
         entry["score"] = {
@@ -357,6 +360,10 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
         civilization = CIVILIZATION_BY_NAME[player.civilization]
         entry["color"] = civilization.color
         entry["text_color"] = civilization.text_color
+        # Onko paikka varattu puhelimelta. Mukana tässä eikä erillisenä
+        # kutsuna, koska pistetaulu on näkyvissä lähes koko ajan ja toinen
+        # pyyntö joka kyselyllä olisi turhaa liikennettä.
+        entry["claimed"] = bool(claims.get(player.civilization))
     data["phase_gates"] = {
         command: sorted(phases)
         for command, phases in PHASE_GATED_COMMANDS.items()

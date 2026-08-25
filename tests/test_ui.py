@@ -461,6 +461,77 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
             first, id(self.app._row_widgets["Saba"]["badge"])
         )
 
+    def test_sequence_shell_is_built_once(self) -> None:
+        """Koko välilehden uudelleenrakennus maksoi 18 pelaajalla ~100 ms."""
+
+        self.app.notebook.select(self.app.sequence_tab)
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+        first = [id(w) for w in self.app.sequence_tab.winfo_children()]
+        buttons = {n: id(b) for n, b in self.app._phase_buttons.items()}
+
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+
+        self.assertEqual(
+            first, [id(w) for w in self.app.sequence_tab.winfo_children()]
+        )
+        self.assertEqual(
+            buttons, {n: id(b) for n, b in self.app._phase_buttons.items()}
+        )
+
+    def test_irrelevant_change_does_not_redraw_the_phase_detail(self) -> None:
+        """Census vaikuttaa vaiheeseen 3; vaihetta 12 katsottaessa ei mihinkään."""
+
+        self.app.game.current_phase = 12
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+        before = [
+            id(w) for w in self.app._sequence_detail_host.winfo_children()
+        ]
+
+        self.app.game.players[0].census = 44
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+
+        self.assertEqual(
+            before,
+            [id(w) for w in self.app._sequence_detail_host.winfo_children()],
+        )
+
+    def test_phase_change_redraws_the_detail(self) -> None:
+        self.app.game.current_phase = 12
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+        before = [
+            id(w) for w in self.app._sequence_detail_host.winfo_children()
+        ]
+
+        self.app.game.current_phase = 3
+        self.app._refresh_sequence()
+        self.root.update_idletasks()
+
+        self.assertNotEqual(
+            before,
+            [id(w) for w in self.app._sequence_detail_host.winfo_children()],
+        )
+
+    def test_ast_canvas_is_reused_and_redrawn_only_on_change(self) -> None:
+        self.app._refresh_ast()
+        self.root.update_idletasks()
+        canvas = self.app._ast_canvas
+        signature = self.app._ast_signature_value
+
+        self.app.game.players[0].census = 31
+        self.app._refresh_ast()
+        self.assertIs(canvas, self.app._ast_canvas)
+        self.assertEqual(signature, self.app._ast_signature_value)
+
+        self.app.game.players[0].ast_step = 9
+        self.app._refresh_ast()
+        self.assertIs(canvas, self.app._ast_canvas)
+        self.assertNotEqual(signature, self.app._ast_signature_value)
+
     def test_hidden_tabs_are_deferred_until_shown(self) -> None:
         self.app._refresh_all()
 
@@ -585,6 +656,60 @@ class RemoteModeTests(unittest.TestCase):
         self.assertFalse(accepted)
         self.assertTrue(info.called)
         self.assertEqual(self.app.game.state_version, 5)
+
+    def test_subtitle_shows_phone_status_in_remote_mode(self) -> None:
+        """Pelinjohtajan on tiedettävä kenen tiedot hän kirjaa itse."""
+
+        class Claiming(_StubRemote):
+            def claims(self):
+                return {"Minoa": True, "Hellas": False}
+
+        self.app.service = Claiming([self._game()])
+        player = self.app.game.players[0]
+
+        self.assertIn("phone", self.app._row_subtitle(player))
+        self.assertNotIn(
+            "no phone", self.app._row_subtitle(self.app.game.players[0])
+        )
+        self.assertIn("no phone", self.app._row_subtitle(self.app.game.players[1]))
+
+    def test_subtitle_omits_phone_status_locally(self) -> None:
+        self.app.service = LocalGameService(self._game())
+
+        subtitle = self.app._row_subtitle(self.app.game.players[0])
+
+        self.assertNotIn("phone", subtitle)
+
+    def test_poll_redraws_the_summary_when_someone_joins(self) -> None:
+        """Liittyminen ei muuta state_versionia, joten se on herätettävä erikseen."""
+
+        class Joining(_StubRemote):
+            def __init__(self, snapshots):
+                super().__init__(snapshots)
+                self.claim_state = {"Minoa": False}
+
+            def claims(self):
+                return dict(self.claim_state)
+
+        service = Joining([self._game(state_version=1)])
+        self.app.service = service
+        redraws = []
+        self.app._refresh_all = lambda: None
+        self.app._refresh_summary = lambda: redraws.append(True)
+        self.app.summary_tab = object()   # riittää hasattr-tarkistukseen
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+        self.assertEqual(redraws, [True])   # ensimmäinen näkemä tila
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+        self.assertEqual(len(redraws), 1)   # ei muutosta, ei piirtoa
+
+        service.claim_state["Minoa"] = True
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+        self.assertEqual(len(redraws), 2)
 
     def test_poll_mirrors_new_state_to_disk(self) -> None:
         """Peili on se, mikä tekee varatilasta hyödyllisen."""
@@ -836,6 +961,143 @@ class DestinationBannerTests(unittest.TestCase):
             self.assertIn(self._directory.name, banners[0])
         finally:
             dialog.destroy()
+
+
+class LobbyTests(unittest.TestCase):
+    """Aula on ainoa reitti paikan vapauttamiseen, joten se on oltava oikein."""
+
+    class _Stub(RemoteGameService):
+        def __init__(self, status) -> None:
+            super().__init__("http://stub.invalid", "t", timeout=0.01)
+            self.status = status
+            self.released = []
+            self.status_calls = 0
+
+        def join_status(self):
+            self.status_calls += 1
+            return self.status
+
+        def release_seat(self, civilization):
+            self.released.append(civilization)
+            for player in self.status["players"]:
+                if player["civilization"] == civilization:
+                    player["claimed"] = False
+            return {"civilization": civilization, "claimed": False}
+
+    def setUp(self) -> None:
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as error:
+            raise unittest.SkipTest(f"no display: {error}")
+        self.root.withdraw()
+        ui_module._configure_styles(self.root)
+        self.game = GameState(
+            player_count=2,
+            players=[
+                PlayerState("Minoa", "Salla", "WEST"),
+                PlayerState("Hellas", "Matti", "WEST"),
+            ],
+            game_mode="WEST",
+        )
+        self.status = {
+            "join_code": "AB7QX",
+            "players": [
+                {"civilization": "Minoa", "nickname": "Salla", "claimed": False},
+                {"civilization": "Hellas", "nickname": "Matti", "claimed": True},
+            ],
+        }
+        self.app = object.__new__(MegaEmpiresApp)
+        self.app.root = self.root
+        self.app.game = self.game
+        self.app.save_path = None
+
+    def tearDown(self) -> None:
+        self.root.destroy()
+
+    def _build(self, service) -> None:
+        self.app.service = service
+        self.app._build_main_view()
+        self.root.update_idletasks()
+
+    def _tabs(self) -> list:
+        return [
+            self.app.notebook.tab(tab, "text")
+            for tab in self.app.notebook.tabs()
+        ]
+
+    def test_players_tab_exists_only_in_remote_mode(self) -> None:
+        self._build(LocalGameService(self.game))
+        self.assertNotIn("Players", self._tabs())
+        self.assertIsNone(self.app.lobby_tab)
+
+        self._build(self._Stub(self.status))
+        self.assertIn("Players", self._tabs())
+
+    def test_lobby_shows_the_code_and_the_seats(self) -> None:
+        self._build(self._Stub(self.status))
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        shown = self._labels(self.app.lobby_tab)
+        self.assertIn("AB7QX", shown)
+        self.assertIn("Minoa (Salla)", shown)
+        self.assertIn("Hellas (Matti)", shown)
+        self.assertIn("1 of 2 players have joined", shown)
+
+    def test_unchanged_status_is_not_redrawn(self) -> None:
+        """Kysely käy parin sekunnin välein; joka kerta piirtäminen välkkyisi."""
+
+        service = self._Stub(self.status)
+        self._build(service)
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+        first = [id(w) for w in self.app.lobby_tab.winfo_children()]
+
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        self.assertEqual(
+            first, [id(w) for w in self.app.lobby_tab.winfo_children()]
+        )
+
+    def test_release_asks_first_and_then_frees_the_seat(self) -> None:
+        service = self._Stub(self.status)
+        self._build(service)
+        self.app._refresh_lobby()
+
+        with mock.patch.object(
+            ui_module.messagebox, "askyesno", return_value=False
+        ):
+            self.app._release_seat("Hellas")
+        self.assertEqual(service.released, [])
+
+        with mock.patch.object(
+            ui_module.messagebox, "askyesno", return_value=True
+        ):
+            self.app._release_seat("Hellas")
+        self.assertEqual(service.released, ["Hellas"])
+
+    def test_lobby_reports_a_connection_failure(self) -> None:
+        class Broken(self._Stub):
+            def join_status(self):
+                raise ServiceUnavailable("server down")
+
+        self._build(Broken(self.status))
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        self.assertIn("server down", " ".join(self._labels(self.app.lobby_tab)))
+
+    @staticmethod
+    def _labels(widget, out=None) -> list:
+        out = [] if out is None else out
+        for child in widget.winfo_children():
+            if isinstance(child, tk.Label):
+                text = child.cget("text").strip()
+                if text:
+                    out.append(text)
+            LobbyTests._labels(child, out)
+        return out
 
 
 if __name__ == "__main__":

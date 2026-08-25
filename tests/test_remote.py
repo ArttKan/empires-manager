@@ -33,6 +33,7 @@ from mega_empires.service import (
     VersionConflict,
 )
 from mega_empires.storage import DATA_DIRECTORY_VARIABLE
+from mega_empires.tokens import TokenStore, tokens_path
 
 TOKEN = "remote-test-token"
 
@@ -221,6 +222,44 @@ class RemoteServiceTests(unittest.TestCase):
 
         self.assertEqual(captured["ua"], USER_AGENT)
         self.assertNotIn("Python-urllib", captured["ua"])
+
+    # -- ylläpito ------------------------------------------------------------
+
+    def test_join_status_reports_code_and_seats(self) -> None:
+        store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+        store.claim(store.join_code, "Hellas", "now")
+
+        status = self.remote.join_status()
+
+        self.assertEqual(status["join_code"], store.join_code)
+        self.assertEqual(
+            {p["civilization"]: p["claimed"] for p in status["players"]},
+            {"Minoa": False, "Hatti": False, "Hellas": True},
+        )
+
+    def test_release_frees_a_seat(self) -> None:
+        store = TokenStore.create(
+            ["Minoa", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+        store.claim(store.join_code, "Hellas", "now")
+
+        self.remote.release_seat("Hellas")
+
+        self.assertFalse(main.get_token_store().is_claimed("Hellas"))
+
+    def test_releasing_an_unknown_civilization_raises(self) -> None:
+        main.set_token_store(
+            TokenStore.create(
+                ["Minoa"], tokens_path(Path(self._directory.name))
+            )
+        )
+
+        with self.assertRaises(UnknownPlayer):
+            self.remote.release_seat("Atlantis")
 
     # -- sopimuksen yhdenmukaisuus ------------------------------------------
 

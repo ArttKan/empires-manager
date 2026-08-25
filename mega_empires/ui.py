@@ -2615,6 +2615,16 @@ class MegaEmpiresApp:
                 self.game = snapshot
                 self._mirror_state(snapshot)
                 self._refresh_all()
+            # Liittyminen ei muuta pelitilaa eikä siis state_versionia, mutta
+            # se näkyy pistetaulun riveillä — herätetään piirto erikseen.
+            claims = self.service.claims()
+            if claims != getattr(self, "_claims_seen", {}):
+                self._claims_seen = claims
+                if hasattr(self, "summary_tab"):
+                    self._refresh_summary()
+            # Aula haetaan omalla kutsullaan, mutta vain kun se on katsottavana.
+            if self._lobby_visible():
+                self._refresh_lobby()
         self._poll_job = self.root.after(delay, self._poll)
 
     def _set_connected(self, connected: bool, message: str) -> None:
@@ -2777,6 +2787,10 @@ class MegaEmpiresApp:
         # Rivien widget-viittaukset osoittavat juuri tuhottuihin olioihin.
         self._row_order = None
         self._row_widgets = {}
+        self._sequence_shell = None
+        self._sequence_signature_value = None
+        self._ast_canvas = None
+        self._ast_signature_value = None
 
         header = ttk.Frame(self.root, padding=(24, 14))
         header.pack(fill="x")
@@ -2843,6 +2857,12 @@ class MegaEmpiresApp:
         self.notebook.add(self.summary_tab, text="Scoreboard")
         self.notebook.add(self.ast_tab, text="A.S.T.")
         self.notebook.add(self.sequence_tab, text="Sequence of Play")
+        # Aula on olemassa vain kun peli on palvelimella: paikallisessa pelissä
+        # ei ole liittymistä eikä paikkoja jaettavaksi.
+        self.lobby_tab = None
+        if isinstance(self.service, RemoteGameService):
+            self.lobby_tab = ttk.Frame(self.notebook)
+            self.notebook.add(self.lobby_tab, text="Players")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self._refresh_all()
 
@@ -2887,7 +2907,7 @@ class MegaEmpiresApp:
         if self.game is None:
             return
         self._refresh_header()
-        self._pending_tabs = {"summary", "ast", "sequence"}
+        self._pending_tabs = {"summary", "ast", "sequence", "lobby"}
         self._refresh_pending_tab()
 
     def _refresh_pending_tab(self) -> None:
@@ -2899,7 +2919,10 @@ class MegaEmpiresApp:
             ("summary", self.summary_tab, self._refresh_summary),
             ("ast", self.ast_tab, self._refresh_ast),
             ("sequence", self.sequence_tab, self._refresh_sequence),
+            ("lobby", getattr(self, "lobby_tab", None), self._refresh_lobby),
         ):
+            if tab is None:
+                continue
             if name in pending and selected == str(tab):
                 pending.discard(name)
                 refresh()
@@ -3171,12 +3194,25 @@ class MegaEmpiresApp:
             command=lambda: self._open_player_dialog(player.civilization),
         ).pack()
 
-    @staticmethod
-    def _row_subtitle(player: PlayerState) -> str:
-        return (
-            f"{player.block}  •  {len(player.advances)} Advances"
-            + ("  •  A.S.T. bonus" if player.ast_bonus else "")
-        )
+    def _row_subtitle(self, player: PlayerState) -> str:
+        """Rivin alateksti; etätilassa mukana puhelimen tila.
+
+        Näytetään myös silloin kun puhelinta EI ole: pelinjohtajan on tiedettävä
+        kenen tiedot hän kirjaa itse, ja se on tärkeämpi tieto kuin se kuka
+        pärjää omillaan.
+        """
+
+        parts = [player.block, f"{len(player.advances)} Advances"]
+        if player.ast_bonus:
+            parts.append("A.S.T. bonus")
+        service = self.service
+        if isinstance(service, RemoteGameService):
+            claims = service.claims()
+            if claims:
+                parts.append(
+                    "phone" if claims.get(player.civilization) else "no phone"
+                )
+        return "  •  ".join(parts)
 
     @staticmethod
     def _row_breakdown(score) -> str:
@@ -3389,51 +3425,58 @@ class MegaEmpiresApp:
         )
 
     def _refresh_sequence(self) -> None:
+        """Päivitä Sequence of Play.
+
+        Kuori rakennetaan kerran ja paneelit vain kun niiden sisältö muuttuu.
+        Aiemmin koko välilehti tuhottiin ja piirrettiin uudelleen: 18 pelaajalla
+        se maksoi ~100 ms, ja etätilassa kysely osuu parin sekunnin välein.
+        """
+
         if self.game is None:
             return
+        current = PHASE_BY_NUMBER[self.game.current_phase]
+        if getattr(self, "_sequence_shell", None) is None:
+            self._build_sequence_shell()
+        self._update_sequence_shell(current)
+
+    def _build_sequence_shell(self) -> None:
         for child in self.sequence_tab.winfo_children():
             child.destroy()
+        self._phase_buttons: dict[int, tk.Button] = {}
+        self._sequence_rules_phase = None
+        # Ei _sequence_signature: se on metodin nimi, ja attribuutti peittäisi sen.
+        self._sequence_signature_value = None
 
-        current = PHASE_BY_NUMBER[self.game.current_phase]
         content = ttk.Frame(self.sequence_tab, padding=(18, 12, 18, 18))
         content.pack(fill="both", expand=True)
 
         phase_column = tk.Frame(content, background=BACKGROUND, width=368)
         phase_column.pack(side="left", fill="y", padx=(0, 16))
         phase_column.pack_propagate(False)
-        tk.Label(
+        self._sequence_heading = tk.Label(
             phase_column,
-            text=(
-                f"TURN {self.game.round_number}  •  "
-                f"PHASE {current.number} OF {len(PHASES)}"
-            ),
+            text="",
             anchor="w",
             font=("Segoe UI Semibold", 23),
             background=BACKGROUND,
             foreground=TEXT,
             pady=18,
-        ).pack(fill="x")
+        )
+        self._sequence_heading.pack(fill="x")
 
         phase_list = tk.Frame(phase_column, background=BACKGROUND)
         phase_list.pack(fill="both", expand=True)
         phase_list.pack_propagate(False)
         for phase in PHASES:
-            selected = phase.number == self.game.current_phase
-            order_summary = self._phase_order_summary(phase)
             button = tk.Button(
                 phase_list,
                 text=(
                     f"{phase.number:>2}.  {phase.name}\n"
-                    f"      {order_summary}"
+                    f"      {self._phase_order_summary(phase)}"
                 ),
                 command=lambda number=phase.number: self._select_phase(number),
                 anchor="w",
                 justify="left",
-                font=("Segoe UI Semibold" if selected else "Segoe UI", 10),
-                background=ACCENT if selected else PANEL,
-                foreground="#101010" if selected else TEXT,
-                activebackground="#efc45b" if selected else PANEL_ALT,
-                activeforeground="#101010" if selected else TEXT,
                 relief="flat",
                 bd=0,
                 padx=12,
@@ -3441,6 +3484,7 @@ class MegaEmpiresApp:
                 wraplength=330,
             )
             button.pack(fill="x", pady=(0, 3))
+            self._phase_buttons[phase.number] = button
 
         summary = tk.Frame(content, background=PANEL, width=400)
         summary.pack(side="right", fill="y", padx=(16, 0))
@@ -3458,11 +3502,71 @@ class MegaEmpiresApp:
             style="Accent.TButton",
             command=lambda: self._change_phase(1),
         ).pack(side="right")
-        self._render_default_rules(summary, current.number)
+        # Omat isäntäkehykset, jotta säännöt ja erittely voidaan tyhjentää
+        # koskematta navigointipainikkeisiin.
+        self._sequence_rules_host = tk.Frame(summary, background=PANEL)
+        self._sequence_rules_host.pack(fill="both", expand=True)
 
-        detail = tk.Frame(content, background=PANEL, padx=24, pady=18)
-        detail.pack(side="left", fill="both", expand=True)
-        self._render_phase_detail(detail, current)
+        self._sequence_detail_host = tk.Frame(
+            content, background=PANEL, padx=24, pady=18
+        )
+        self._sequence_detail_host.pack(side="left", fill="both", expand=True)
+        self._sequence_shell = content
+
+    def _sequence_signature(self, phase: Phase) -> tuple:
+        """Kaikki mitä erittelypaneeli näyttää, vertailtavassa muodossa.
+
+        Useimmat komennot eivät muuta juuri katsottavan vaiheen sisältöä —
+        Census vaikuttaa vaiheeseen 3, kaupungit vaiheeseen 6 — joten
+        allekirjoitus säästää valtaosan uudelleenpiirroista.
+        """
+
+        ordered = phase_order(phase, self.game.players)
+        return (
+            phase.number,
+            tuple(
+                (
+                    player.display_name,
+                    self._phase_order_detail(phase, player),
+                    self._owned_affecting_advances(phase, player),
+                )
+                for player in ordered
+            ),
+            sum(player.cities == 0 for player in self.game.players),
+        )
+
+    def _update_sequence_shell(self, current: Phase) -> None:
+        self._sequence_heading.configure(
+            text=(
+                f"TURN {self.game.round_number}  •  "
+                f"PHASE {current.number} OF {len(PHASES)}"
+            )
+        )
+        for number, button in self._phase_buttons.items():
+            selected = number == current.number
+            button.configure(
+                font=("Segoe UI Semibold" if selected else "Segoe UI", 10),
+                background=ACCENT if selected else PANEL,
+                foreground="#101010" if selected else TEXT,
+                activebackground="#efc45b" if selected else PANEL_ALT,
+                activeforeground="#101010" if selected else TEXT,
+            )
+
+        # Oletussäännöt riippuvat vain vaiheesta.
+        if self._sequence_rules_phase != current.number:
+            for child in self._sequence_rules_host.winfo_children():
+                child.destroy()
+            self._render_default_rules(
+                self._sequence_rules_host, current.number
+            )
+            self._sequence_rules_phase = current.number
+
+        signature = self._sequence_signature(current)
+        if signature != getattr(self, "_sequence_signature_value", None):
+            for child in self._sequence_detail_host.winfo_children():
+                child.destroy()
+            self._render_phase_detail(self._sequence_detail_host, current)
+            self._sequence_signature_value = signature
 
     def _render_default_rules(
         self,
@@ -4070,9 +4174,239 @@ class MegaEmpiresApp:
             if advance_id in player.advances
         )
 
+    # ── Players / aula ──────────────────────────────────────────────────
+
+    def _lobby_visible(self) -> bool:
+        # getattr, koska _poll() käy ajastimella ja voi osua hetkeen jolloin
+        # päänäkymää ei ole vielä rakennettu.
+        tab = getattr(self, "lobby_tab", None)
+        return (
+            tab is not None
+            and hasattr(self, "notebook")
+            and self.notebook.select() == str(tab)
+        )
+
+    def _refresh_lobby(self) -> None:
+        """Näytä liittymisohje ja paikkojen tila.
+
+        Rakennetaan uudelleen vain kun tila tosiasiassa muuttui: kysely käy
+        parin sekunnin välein, ja joka kerta uudelleen piirtäminen välkkyisi.
+        """
+
+        service = self.service
+        tab = getattr(self, "lobby_tab", None)
+        if tab is None or not isinstance(service, RemoteGameService):
+            return
+        try:
+            status = service.join_status()
+        except CommandError as error:
+            self._render_lobby_error(str(error))
+            return
+
+        signature = (
+            status.get("join_code"),
+            tuple(
+                (p["civilization"], p.get("nickname", ""), p["claimed"])
+                for p in status.get("players", [])
+            ),
+        )
+        if getattr(self, "_lobby_signature", None) == signature:
+            return
+        self._lobby_signature = signature
+        self._render_lobby(status)
+
+    def _render_lobby_error(self, message: str) -> None:
+        self._lobby_signature = None
+        for child in self.lobby_tab.winfo_children():
+            child.destroy()
+        tk.Label(
+            self.lobby_tab,
+            text=message,
+            font=("Segoe UI", 14),
+            background=BACKGROUND,
+            foreground=ERROR,
+            wraplength=900,
+        ).pack(pady=60)
+
+    def _render_lobby(self, status: dict) -> None:
+        for child in self.lobby_tab.winfo_children():
+            child.destroy()
+        service = self.service
+
+        outer = ttk.Frame(self.lobby_tab, padding=(28, 18))
+        outer.pack(fill="both", expand=True)
+
+        # Ohje on tarkoitettu luettavaksi television katseluetäisyydeltä.
+        banner = tk.Frame(outer, background=PANEL, highlightthickness=0)
+        banner.pack(fill="x", pady=(0, 18))
+        tk.Label(
+            banner,
+            text="Join the game at",
+            font=("Segoe UI", 15),
+            background=PANEL,
+            foreground=MUTED,
+        ).pack(pady=(16, 2))
+        tk.Label(
+            banner,
+            text=service.base_url.replace("https://", ""),
+            font=("Segoe UI Semibold", 34),
+            background=PANEL,
+            foreground=TEXT,
+        ).pack()
+        tk.Label(
+            banner,
+            text="Game code",
+            font=("Segoe UI", 15),
+            background=PANEL,
+            foreground=MUTED,
+        ).pack(pady=(14, 2))
+        tk.Label(
+            banner,
+            text=status.get("join_code", "—"),
+            font=("Segoe UI Semibold", 54),
+            background=PANEL,
+            foreground=ACCENT,
+        ).pack(pady=(0, 18))
+
+        players = status.get("players", [])
+        joined = sum(1 for p in players if p["claimed"])
+        tk.Label(
+            outer,
+            text=f"{joined} of {len(players)} players have joined",
+            font=("Segoe UI", 13),
+            background=BACKGROUND,
+            foreground=MUTED,
+        ).pack(anchor="w", pady=(0, 8))
+
+        grid = ttk.Frame(outer)
+        grid.pack(fill="both", expand=True)
+        columns = 2
+        for column in range(columns):
+            grid.columnconfigure(column, weight=1, uniform="lobby")
+        for index, player in enumerate(players):
+            self._lobby_row(
+                grid, player, index % columns, index // columns
+            )
+
+    def _lobby_row(
+        self,
+        parent: ttk.Frame,
+        player: dict,
+        column: int,
+        row: int,
+    ) -> None:
+        civilization = CIVILIZATION_BY_NAME[player["civilization"]]
+        claimed = player["claimed"]
+        nickname = player.get("nickname", "")
+
+        outer = tk.Frame(parent, background=PANEL)
+        outer.grid(
+            row=row,
+            column=column,
+            sticky="ew",
+            padx=(0 if column == 0 else 6, 6 if column == 0 else 0),
+            pady=3,
+        )
+        parent.rowconfigure(row, weight=0)
+
+        tk.Label(
+            outer,
+            text=" ",
+            width=2,
+            background=civilization.color,
+        ).pack(side="left", fill="y")
+        label = player["civilization"] + (f" ({nickname})" if nickname else "")
+        tk.Label(
+            outer,
+            text=label,
+            anchor="w",
+            font=("Segoe UI Semibold", 13),
+            background=PANEL,
+            foreground=TEXT,
+        ).pack(side="left", padx=12, pady=9)
+
+        if claimed:
+            ttk.Button(
+                outer,
+                text="Release",
+                width=8,
+                command=lambda civ=player["civilization"]: self._release_seat(civ),
+            ).pack(side="right", padx=8, pady=5)
+            tk.Label(
+                outer,
+                text="joined",
+                font=("Segoe UI Semibold", 11),
+                background=PANEL,
+                foreground="#4caf6d",
+            ).pack(side="right", padx=6)
+        else:
+            tk.Label(
+                outer,
+                text="waiting",
+                font=("Segoe UI", 11),
+                background=PANEL,
+                foreground=MUTED,
+            ).pack(side="right", padx=14)
+
+    def _release_seat(self, civilization: str) -> None:
+        """Vapauta paikka, jotta pelaaja voi liittyä uudelleen.
+
+        Tämä on ainoa reitti paikan vapauttamiseen: pelaajalla itsellään ei ole
+        sitä, koska vahingossa painettuna se lukitsisi hänet ulos kesken pelin.
+        """
+
+        service = self.service
+        if not isinstance(service, RemoteGameService):
+            return
+        if not messagebox.askyesno(
+            "Release this seat?",
+            f"{civilization} can then be claimed again with the game code. "
+            "The phone currently using it will be signed out.",
+            icon="warning",
+            parent=self.root,
+        ):
+            return
+        try:
+            service.release_seat(civilization)
+        except CommandError as error:
+            messagebox.showerror(
+                "Could not release the seat", str(error), parent=self.root
+            )
+            return
+        self._lobby_signature = None
+        self._refresh_lobby()
+
     def _refresh_ast(self) -> None:
+        """Päivitä A.S.T.-välilehti.
+
+        Otsikko, selite ja vaatimuspaneeli ovat kiinteitä koko pelin ajan, joten
+        ne rakennetaan kerran. Vain kangas riippuu pelitilasta, ja sekin
+        piirretään uudelleen vain kun markkereiden tilanne tosiasiassa muuttui.
+        """
+
         if self.game is None:
             return
+        if getattr(self, "_ast_canvas", None) is None:
+            self._build_ast_shell()
+        signature = self._ast_signature()
+        if signature == getattr(self, "_ast_signature_value", None):
+            return
+        self._ast_signature_value = signature
+        self._draw_ast(self._ast_canvas)
+
+    def _ast_signature(self) -> tuple:
+        return tuple(
+            (
+                player.civilization,
+                player.ast_step,
+                ast_marker_state(
+                    player, self.game.player_count, self.game.game_mode
+                ),
+            )
+            for player in players_in_ast_order(self.game.players)
+        )
+
+    def _build_ast_shell(self) -> None:
         for child in self.ast_tab.winfo_children():
             child.destroy()
 
@@ -4126,10 +4460,12 @@ class MegaEmpiresApp:
             highlightthickness=0,
         )
         canvas.pack(side="left", fill="both", expand=True)
+        # Koon muutos vaatii piirron riippumatta siitä muuttuiko pelitila.
         canvas.bind(
             "<Configure>",
             lambda _event: self._draw_ast(canvas),
         )
+        self._ast_canvas = canvas
 
     def _build_ast_requirements_panel(self, parent: tk.Frame) -> None:
         tk.Label(

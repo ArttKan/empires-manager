@@ -57,7 +57,20 @@ class RemoteGameService(GameService):
     # -- luku ---------------------------------------------------------------
 
     def snapshot(self) -> GameState:
-        return GameState.from_dict(self._request("GET", "/state"))
+        data = self._request("GET", "/state")
+        # `claimed` ei kuulu pelitilaan eikä säily GameStatessa, joten se
+        # otetaan talteen tässä. Näin pistetaulu voi näyttää kenellä on puhelin
+        # ilman erillistä kutsua.
+        self._claims = {
+            str(entry["civilization"]): bool(entry.get("claimed"))
+            for entry in data.get("players", [])
+        }
+        return GameState.from_dict(data)
+
+    def claims(self) -> dict:
+        """Sivilisaatio -> onko paikka varattu, viimeisimmästä tilannekuvasta."""
+
+        return dict(getattr(self, "_claims", {}))
 
     # -- komennot -----------------------------------------------------------
 
@@ -191,6 +204,28 @@ class RemoteGameService(GameService):
 
         data = self._request("POST", "/game", game.to_dict())
         return int(data["state_version"])
+
+    # -- ylläpito ------------------------------------------------------------
+    #
+    # Nämä eivät kuulu `GameService`-rajapintaan: paikallisessa tilassa ei ole
+    # liittymistä eikä tokeneita, joten niillä ei olisi vastinetta.
+
+    def join_status(self) -> dict:
+        """Liittymiskoodi ja paikkojen tila aulanäkymää varten."""
+
+        return self._request("GET", "/admin/join")
+
+    def release_seat(self, civilization: str) -> dict:
+        """Vapauta paikka uudelleen varattavaksi.
+
+        Tarvitaan kun puhelin vaihtuu tai selaimen tiedot tyhjenevät. Pelaajalla
+        itsellään ei ole tätä: vahingossa painettuna se lukitsisi hänet ulos
+        kesken pelin.
+        """
+
+        return self._request(
+            "POST", "/admin/release", {"civilization": civilization}
+        )
 
     # -- sisäiset ------------------------------------------------------------
 

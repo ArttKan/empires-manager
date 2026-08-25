@@ -163,9 +163,17 @@ the backend conversion tractable.
   create/destroy operations and **1401 ms per click at 18 players**; in-place
   update is 0.5 ms. Rows are rebuilt only when the set of civilizations changes.
 - **Only the visible tab is redrawn.** `_refresh_all()` puts the others in
-  `self._pending_tabs`; `_on_tab_changed` draws them when shown. A.S.T. and
-  Sequence still rebuild wholesale (~34 ms and ~86 ms), which is fine when paid
-  only on the tab you are looking at.
+  `self._pending_tabs`; `_on_tab_changed` draws them when shown.
+- **Every tab builds its shell once and redraws only what changed.** All three
+  used to destroy and rebuild wholesale — 18 players cost ~1400 ms (Scoreboard),
+  ~100 ms (Sequence) and ~32 ms (A.S.T.), which is untenable once a remote poll
+  can trigger a redraw every two seconds. Now: Scoreboard updates labels in place;
+  Sequence keeps its shell and 13 phase buttons and rebuilds the rules panel only
+  when the phase changes and the detail panel only when `_sequence_signature()`
+  differs; A.S.T. keeps its canvas and redraws only when `_ast_signature()`
+  differs. A change that does not affect the visible tab now costs ~0.2 ms.
+  **The signatures must list everything the panel renders** — miss a field and the
+  view silently goes stale.
 - **Row callbacks must not trust their closure.** Rows outlive many state changes,
   so the `player` captured at build time is a stale copy. Look the current value up
   with `_player(civilization)` — this applies to counters, the census field, and
@@ -357,8 +365,23 @@ not.
   tell whether a phone is running current code — which is the first thing worth
   establishing when the page misbehaves.
 
-Remaining: the manifest and service worker for home-screen install, and the lobby
-view in the desktop app (join code and claim status on the TV, release a seat).
+**Scoreboard rows show phone status in remote mode** — `WEST • 3 Advances • phone`
+or `• no phone`. Shown for unclaimed seats too, because the game master needs to
+know whose data they are typing themselves. `/state` carries `claimed` per player
+so the scoreboard needs no second request; `RemoteGameService.snapshot()` caches it
+because `GameState.from_dict` drops it (claims are not game state). Claiming does
+not change `state_version`, so `_poll()` compares the claim map separately and
+redraws the summary when it moves.
+
+**The desktop app has a Players tab in remote mode only** — join URL and code at
+TV-reading size, every seat with its component colour, the setup nickname and its
+claim status, and a Release button per claimed seat. It is the **only** way to free
+a seat, since the phone deliberately has none. Claiming does not change
+`state_version`, so the lobby fetches `/admin/join` on the poll tick but only while
+its tab is visible, and redraws only when the status actually differs — otherwise a
+two-second poll would flicker the whole tab.
+
+Remaining: the manifest and service worker for home-screen install.
 
 **No browser TV display.** The laptop drives the TV with the Tkinter views, which
 removed the largest piece of Phase C. Mobile browsers drop SSE when the screen
