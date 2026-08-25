@@ -11,6 +11,31 @@ SERVICE="${SERVICE:-mega-empires-backend.service}"
 BRANCH="${BRANCH:-backend-sekoilu}"
 SYSTEMCTL="/usr/bin/systemctl"
 
+INSTALLED_UNIT="/etc/systemd/system/$SERVICE"
+
+check_unit_drift() {
+    # Deploy ei voi asentaa unit-tiedostoa: sovelluskäyttäjän sudo-oikeus on
+    # rajattu pelkkään uudelleenkäynnistykseen. Muutos jäisi siis repoon ilman
+    # että se tulee voimaan, eikä mikään kertoisi siitä — sama hiljainen
+    # epäonnistuminen kuin aiemmalla skip-worktree-viritelmällä.
+    local repo_unit="$APP_DIR/deploy/mega-empires-backend.service"
+    [ -f "$repo_unit" ] && [ -r "$INSTALLED_UNIT" ] || return 0
+    if cmp -s "$repo_unit" "$INSTALLED_UNIT"; then
+        return 0
+    fi
+    echo
+    echo "======================================================================"
+    echo " HUOM: repon unit-tiedosto eroaa käytössä olevasta."
+    echo " Palvelu käynnistyi VANHALLA unitilla. Aja admin-tunnuksella:"
+    echo
+    echo "   sudo cp $repo_unit \\"
+    echo "           $INSTALLED_UNIT"
+    echo "   sudo systemctl daemon-reload"
+    echo "   sudo systemctl restart $SERVICE"
+    echo "======================================================================"
+    echo
+}
+
 cd "$APP_DIR"
 
 # Palvelimella ei pidä olla paikallisia muutoksia: ne katoaisivat huomaamatta.
@@ -54,6 +79,7 @@ sleep 2
 
 if "$SYSTEMCTL" is-active --quiet "$SERVICE"; then
     echo "OK: palvelu on käynnissä revisiossa ${current_revision:0:8}."
+    check_unit_drift
 else
     echo "VIRHE: palvelu ei käynnistynyt." >&2
     echo "Katso loki: journalctl -u $SERVICE -n 50 --no-pager" >&2
