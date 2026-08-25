@@ -3210,7 +3210,9 @@ class MegaEmpiresApp:
             claims = service.claims()
             if claims:
                 parts.append(
-                    "phone" if claims.get(player.civilization) else "no phone"
+                    "phone connected"
+                    if claims.get(player.civilization)
+                    else "no phone connected"
                 )
         return "  •  ".join(parts)
 

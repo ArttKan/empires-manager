@@ -667,11 +667,17 @@ class RemoteModeTests(unittest.TestCase):
         self.app.service = Claiming([self._game()])
         player = self.app.game.players[0]
 
-        self.assertIn("phone", self.app._row_subtitle(player))
-        self.assertNotIn(
-            "no phone", self.app._row_subtitle(self.app.game.players[0])
+        self.assertIn(
+            "phone connected", self.app._row_subtitle(self.app.game.players[0])
         )
-        self.assertIn("no phone", self.app._row_subtitle(self.app.game.players[1]))
+        self.assertNotIn(
+            "no phone connected",
+            self.app._row_subtitle(self.app.game.players[0]),
+        )
+        self.assertIn(
+            "no phone connected",
+            self.app._row_subtitle(self.app.game.players[1]),
+        )
 
     def test_subtitle_omits_phone_status_locally(self) -> None:
         self.app.service = LocalGameService(self._game())

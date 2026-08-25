@@ -365,8 +365,8 @@ not.
   tell whether a phone is running current code — which is the first thing worth
   establishing when the page misbehaves.
 
-**Scoreboard rows show phone status in remote mode** — `WEST • 3 Advances • phone`
-or `• no phone`. Shown for unclaimed seats too, because the game master needs to
+**Scoreboard rows show phone status in remote mode** — `WEST • 3 Advances • phone connected`
+or `• no phone connected`. Shown for unclaimed seats too, because the game master needs to
 know whose data they are typing themselves. `/state` carries `claimed` per player
 so the scoreboard needs no second request; `RemoteGameService.snapshot()` caches it
 because `GameState.from_dict` drops it (claims are not game state). Claiming does
