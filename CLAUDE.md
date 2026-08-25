@@ -28,9 +28,7 @@ own data from phones. See "Backend conversion" below.
 |---|---|
 | Conversation with the user | **English** (user's explicit instruction, overrides `AGENTS.md`) |
 | This file | English |
-| Desktop app (`ui.py`) user-visible strings | **English** — must match the rulebooks and printed components |
-| Player PWA (`web/`) user-visible strings | **Finnish** chrome, **English** domain terms (Civilization Advance, Census, A.S.T., civilization names) |
-| HTTP API messages (`detail` fields) | **English** — part of the interface, asserted in tests; the PWA supplies its own Finnish text per status code |
+| All user-visible GUI strings, desktop and PWA | **English** — must match the rulebooks and printed components |
 | Source code comments and docstrings | **Finnish** — match the existing style |
 | `PROJEKTI.md`, `KAYTTOOHJE.md`, `deploy/README.md`, commit messages | **Finnish** |
 
