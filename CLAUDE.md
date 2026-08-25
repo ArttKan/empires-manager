@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Instructions for Claude Code working in this repository. This file is authoritative
-for agent behaviour and supersedes `AGENTS.md` where the two disagree.
+for agent behaviour.
 
 ## What this project is
 
@@ -15,9 +15,9 @@ published or distributed. Practicality during a live game beats defensive
 validation and general-purpose architecture. The main risk to protect against is
 **entering data for the wrong player**, not malformed input.
 
-The full spec is `PROJEKTI.md` (Finnish); the end-user manual is `KAYTTOOHJE.md`
-(Finnish). Both are current — read the relevant section before changing behaviour
-they describe.
+This file is the project's documentation. There is no separate spec or user
+manual — what matters is recorded here, in `deploy/README.md` for the server, and
+in the code's Finnish comments.
 
 **In progress:** conversion to a client/server system so players can enter their
 own data from phones. See "Backend conversion" below.
@@ -26,11 +26,11 @@ own data from phones. See "Backend conversion" below.
 
 | Context | Language |
 |---|---|
-| Conversation with the user | **English** (user's explicit instruction, overrides `AGENTS.md`) |
+| Conversation with the user | **English** (user's explicit instruction) |
 | This file | English |
 | All user-visible GUI strings, desktop and PWA | **English** — must match the rulebooks and printed components |
 | Source code comments and docstrings | **Finnish** — match the existing style |
-| `PROJEKTI.md`, `KAYTTOOHJE.md`, `deploy/README.md`, commit messages | **Finnish** |
+| `deploy/README.md`, commit messages | **Finnish** |
 
 Domain terms stay in English everywhere (Civilization Advance, Census, A.S.T.,
 Trade Cards Acquisition, Calamity, …) — they are printed on the components.
@@ -59,9 +59,6 @@ tkinter is missing, so the suite runs headless on the server too.
 **The deployment target is Python 3.10** (Ubuntu 22.04) and is not being upgraded.
 Do not use syntax or stdlib APIs newer than 3.10. Verify with
 `ast.parse(source, feature_version=(3, 10))` when in doubt.
-
-`KAYTTOOHJE.md` still documents PowerShell and Python 3.12 from the project's
-Windows origin.
 
 ## Architecture
 
@@ -126,13 +123,39 @@ the backend conversion tractable.
   so rows never jump around mid-game; the large badge shows the current rank from
   `visible_rankings`. Do not re-sort rows by score. That stability is what allows
   the rows to be built once and updated in place — see below.
-- **Tie-breaks** follow the official list only as far as stored data allows.
-  Credit-token criteria (steps 4–5) are not tracked, so a tie that would need them
-  must be shown as unresolved, never claimed as decided.
+- **Tie-breaks** follow the official list only as far as stored data allows:
+  1. further-advanced A.S.T. marker (A.S.T. ranking alone does not decide it)
+  2. number of 6 VP Advances, then number of 3 VP Advances
+  3. total cost of all Advances
+  4. largest single-colour credit-token value — **not tracked**
+  5. total value of all credit tokens — **not tracked**
+  6. number of cities
+  7. population tokens on the board (Census)
+  8. A.S.T. ranking
+
+  `scoring._tie_break_key()` implements every step except 4–5. A tie that would
+  need those must be shown as unresolved, never claimed as decided.
 - **Colour is never the only signal** — name, civilization, and rank are always
   present as text.
 - `ast_variant` is stored as `BASIC`/`EXPERT`, but only Basic is implemented;
   `ast_era_index()` raises on `EXPERT` by design.
+
+## Where the rules live
+
+The rulebooks are not kept in the repo (re-downloadable from mega-empires.com).
+When a rule needs checking:
+
+- **West / East Basic Rulebook** — Sequence of Play pp. 16–25; scoring and
+  tie-breaks p. 25; summary table on the last page
+- **East Additional Scenarios** — 10–18 player combined game pp. 16–25, its
+  Sequence of Play p. 23, and the A.S.T. bonus p. 25
+- **Archeological Succession Table (Basic Version)** component — civilization
+  colours, A.S.T. ranking order, era boundaries, the 5–75 VP scale
+- **MegaEmpires Advancement Reference v3** — the 51 Advances, their costs,
+  credits, and the 1 VP → 3 VP → 6 VP row chains
+
+Everything derived from these is already in `data.py` and `ast_rules.py`; the
+books are only needed to verify a rule, never to run the program.
 
 ## Working conventions
 
@@ -190,8 +213,7 @@ the backend conversion tractable.
 
 ## Backend conversion
 
-Converting to a self-hosted backend with phone clients. Context lives in
-`mega-empires-phase-a-handoff.md`; deployment specifics in
+Converting to a self-hosted backend with phone clients. Deployment specifics in
 [deploy/README.md](deploy/README.md).
 
 **Deployed environment:** `olohuone-ubuntu`, Ubuntu 22.04, Python 3.10, headless.
@@ -222,10 +244,10 @@ through an ordinary deploy. The `ECHO_TOKEN` lives in
 drops to the service user. `EnvironmentFile` is deliberately mandatory: a missing
 file stops the service rather than letting it serve wrongly.
 
-This replaced an earlier arrangement where the box's copy carried the token inline
-under `git update-index --skip-worktree`, which silently prevented unit changes
-from ever reaching the server. That migration has been completed on the box, so
-unit changes now deploy normally — do not reintroduce a secret into the template.
+**Do not put a secret back into the unit.** An earlier arrangement kept the token
+inline on the box under `git update-index --skip-worktree`, which silently stopped
+unit changes ever reaching the server. `deploy.sh` warns when the repo's unit and
+the installed one differ, since it cannot install unit files itself.
 
 **Phase B, in progress.** The plan: one game state on the box; the laptop runs the
 full Tkinter app as a *client* of it (main hub, full authority); phones are narrow

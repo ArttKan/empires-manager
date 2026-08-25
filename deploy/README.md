@@ -17,77 +17,13 @@ korvaa työhakemiston sisällön eikä saa hävittää pelejä.
 
 ---
 
-## Ensimmäinen käyttöönotto
+## Asennus tyhjälle koneelle
 
-> **Tämä vaihe on tehty.** Pipeline on pystyssä ja push-to-live on todettu
-> toimivaksi oikealla koodimuutoksella. Ohjeet on säilytetty siltä varalta, että
-> palvelin pitää joskus rakentaa uudelleen tyhjästä. Jatkuvaa päivitystä varten
-> katso "Päivitys jatkossa".
+Nykyinen palvelin on jo pystyssä; nämä ohjeet ovat sen varalle että se pitää
+rakentaa uudelleen. Vaiheen A skeleton ja siihen liittynyt käsin kopiointi on
+poistettu — koko sovellus tulee nyt gitistä.
 
-Sovellushakemisto on jo olemassa ja sisältää käsin sijoitetun Phase A -skeletonin,
-joka **ei ole gitissä**. Ensimmäinen käyttöönotto on siis muunnos, ei puhdas
-asennus. Vanha hakemisto säilytetään varmuuskopiona kunnes uusi on todettu
-toimivaksi.
-
-### 0. Kehityskoneella: skeleton gittiin
-
-Ilman tätä git-checkout tuottaa hakemiston, jossa ei ole `main.py`-tiedostoa ja
-`ExecStart` epäonnistuu.
-
-Palvelimella on kolme tiedostoa, jotka kuuluvat gittiin: `main.py`,
-`requirements.txt` ja `sse-test.html`. `__pycache__` jää pois — se on jo
-`.gitignore`ssa.
-
-```bash
-# SSH toimii vain Tailscalen kautta.
-REMOTE=arttu@<tailscale-ip>:/home/megaempires/mega-empires-backend
-scp "$REMOTE/main.py" "$REMOTE/requirements.txt" "$REMOTE/sse-test.html" .
-```
-
-Tarkista `requirements.txt`: jos se on käsin kirjoitettu ilman versioita, korvaa
-se palvelimen todellisilla versioilla, koska Python 3.10 on se ympäristö jolla on
-merkitystä:
-
-```bash
-ssh arttu@<tailscale-ip> \
-    'sudo -u megaempires <venv>/bin/pip freeze' > requirements.txt
-```
-
-```bash
-git add main.py requirements.txt sse-test.html
-git commit -m "Lisää Phase A -skeleton ja riippuvuudet"
-git push origin backend-sekoilu
-```
-
-`sse-test.html` tarvitaan mukaan, koska `main.py` palvelee sen `/sse-test`
--reitiltä suhteellisella polulla. Ilman sitä reitti hajoaa.
-
-**Haara:** koko backend-työ tehdään `backend-sekoilu`-haarassa ja `master`
-jätetään koskematta, kunnes ketju on todettu kokonaisuudessaan toimivaksi.
-`deploy.sh` käyttää tätä haaraa oletuksena.
-
-### 1. Palvelu alas ja vanha hakemisto talteen
-
-Selvitä ensin, missä nykyinen venv on. Käytössä oleva unit tietää sen:
-
-```bash
-ssh arttu@<tailscale-ip>
-systemctl cat mega-empires-backend.service | grep -E 'ExecStart|Environment'
-ls -a /home/megaempires/mega-empires-backend
-```
-
-Jos venv on **sovellushakemiston sisällä** (esim. `.venv`), se katoaa kun hakemisto
-siirretään — mikä on tässä hyväksyttävää, koska uusi venv luodaan joka tapauksessa
-kohdassa 3. Varmista vain, että talteen otetut `Environment=`-rivit, erityisesti
-bearer-token, ovat tiedossa ennen kuin unit korvataan.
-
-```bash
-sudo systemctl stop mega-empires-backend.service
-sudo -u megaempires mv /home/megaempires/mega-empires-backend \
-                       /home/megaempires/mega-empires-backend.bak
-```
-
-### 2. Deploy-avain GitHubiin
+### 1. Deploy-avain GitHubiin
 
 Repo on yksityinen, joten palvelin tarvitsee oman lukuoikeudellisen avaimen.
 
@@ -104,10 +40,10 @@ Lisää julkinen avain GitHubissa: repo → Settings → Deploy keys → Add dep
 sudo -u megaempires ssh -T git@github.com
 ```
 
-### 3. Kloonaus ja venv
+### 2. Kloonaus ja venv
 
 Kloonaus ottaa suoraan oikean haaran. Ilman `--branch`-valitsinta työhakemistoon
-jäisi `master`, jossa skeletonia ei ole, eikä palvelu käynnistyisi.
+jäisi `master`, jossa backend-työtä ei ole.
 
 ```bash
 sudo -u megaempires git clone --branch backend-sekoilu \
@@ -119,10 +55,9 @@ sudo -u megaempires /home/megaempires/venv/bin/pip install -r \
     /home/megaempires/mega-empires-backend/requirements.txt
 ```
 
-### 4. systemd ja sudo-sääntö
+### 3. Token, systemd ja sudo-sääntö
 
-Tarkista, että `ExecStart` osoittaa oikeaan venviin. Unit ei sisällä
-salaisuuksia, joten se voidaan kopioida sellaisenaan — token luetaan
+Unit ei sisällä salaisuuksia, joten se kopioidaan sellaisenaan. Token luetaan
 `/etc/mega-empires-backend.env`-tiedostosta, joka on luotava **ennen**
 käynnistystä tai palvelu ei käynnisty lainkaan.
 
@@ -135,10 +70,13 @@ sudo install -m 0440 -o root -g root \
     deploy/megaempires-deploy.sudoers /etc/sudoers.d/megaempires-deploy
 sudo visudo -c
 sudo systemctl daemon-reload
-sudo systemctl start mega-empires-backend.service
+sudo systemctl enable --now mega-empires-backend.service
 ```
 
-### 5. Tarkistukset
+Muuttujan nimi on historiallinen (`ECHO_TOKEN`, Phase A:n ajoilta). `main.py`
+lukee myös `MEGA_EMPIRES_TOKEN`-nimen, jos se halutaan joskus vaihtaa.
+
+### 4. Tarkistukset
 
 ```bash
 systemctl status mega-empires-backend.service
@@ -147,40 +85,9 @@ curl -s http://127.0.0.1:8000/health    # paikallisesti
 curl -s https://empiresmanager.com/health   # tunnelin läpi
 ```
 
-Lopuksi puhelimella mobiilidatalla, wifi pois — se on oikea reitti.
-
-### 6. Deploy-silmukan testaus
-
-Todista silmukka nyt, kun mikään ei vielä riipu siitä. Tee kehityskoneella pieni
-muutos, pushaa, ja aja palvelimella:
-
-```bash
-sudo -u megaempires /home/megaempires/mega-empires-backend/deploy/deploy.sh
-```
-
-Skriptin pitää hakea muutos, ajaa testit ja käynnistää palvelu uudelleen.
-
-### 7. Varmuuskopion poisto
-
-Vasta kun kaikki yllä toimii:
-
-```bash
-sudo -u megaempires rm -rf /home/megaempires/mega-empires-backend.bak
-```
-
-### Peruutus
-
-Jos jokin menee pieleen, vanha tila palautuu suoraan:
-
-```bash
-sudo systemctl stop mega-empires-backend.service
-sudo -u megaempires rm -rf /home/megaempires/mega-empires-backend
-sudo -u megaempires mv /home/megaempires/mega-empires-backend.bak \
-                       /home/megaempires/mega-empires-backend
-sudo systemctl start mega-empires-backend.service
-```
-
----
+Lopuksi puhelimella mobiilidatalla, wifi pois — se on oikea reitti. Peli
+luodaan työpöytäsovelluksen velholla etätilassa; palvelimelle ei tarvitse
+kopioida tallennuksia käsin.
 
 ## Päivitys jatkossa
 
@@ -225,62 +132,41 @@ käsiksi lainkaan.
 
 `EnvironmentFile` on tahallisesti pakollinen (ei `-`-etuliitettä): jos tiedosto
 puuttuu, palvelu ei käynnisty ollenkaan. Se on parempi kuin käynnistyvä palvelu,
-jonka `/echo` vastaa hiljaa virheellisesti.
+joka hylkää kaikki tunnistautuneet pyynnöt.
 
-### Siirtymä skip-worktreestä — kertaluontoinen
+Aiemmin unitin repoversio oli pelkkä malli ja palvelimen kopioon kirjoitettiin
+token käsin, `git update-index --skip-worktree` piilottamana. Siitä luovuttiin:
+se esti unit-muutosten päätymisen palvelimelle hiljaisesti. **Älä palauta
+salaisuutta unitiin.**
 
-Aiemmin unitin repoversio oli pelkkä malli: palvelimen kopioon oli kirjoitettu
-oikea token, ja `git update-index --skip-worktree` esti sen näkymisen likaisena.
-Sivuvaikutus oli ikävä — repon unit-muutokset eivät koskaan päätyneet
-palvelimelle, ja deploy näytti onnistuvan vaikka palvelu jäi vanhaan unitiin.
-
-Aja nämä kerran palvelimella. **Järjestys on olennainen:** token on luettava
-talteen ennen kuin paikallinen muokkaus hylätään, ja env-tiedoston on oltava
-olemassa ennen kuin uusi unit otetaan käyttöön.
+Tokenin vaihtaminen käy nyt suoraan:
 
 ```bash
-# 1. Lue nykyinen token talteen ENNEN kuin mitään hylätään.
-sudo systemctl cat mega-empires-backend.service | grep ECHO_TOKEN
-
-# 2. Luo env-tiedosto repon ulkopuolelle.
-sudo install -m 0600 -o root -g root /dev/null /etc/mega-empires-backend.env
-printf 'ECHO_TOKEN=%s\n' '<vaiheessa 1 luettu token>' \
-    | sudo tee /etc/mega-empires-backend.env >/dev/null
-
-# 3. Vapauta tiedosto gitin normaaliin hallintaan ja hae uusi malli.
-cd /home/megaempires/mega-empires-backend
-sudo -u megaempires git update-index --no-skip-worktree \
-    deploy/mega-empires-backend.service
-sudo -u megaempires git checkout -- deploy/mega-empires-backend.service
-sudo -u megaempires git pull
-
-# 4. Ota uusi unit käyttöön.
-sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
-sudo systemctl daemon-reload
+sudo printf 'ECHO_TOKEN=%s\n' '<uusi token>' | sudo tee /etc/mega-empires-backend.env >/dev/null
 sudo systemctl restart mega-empires-backend.service
+curl -s -o /dev/null -w '%{http_code}\n' https://empiresmanager.com/state \
+  -H "Authorization: Bearer <uusi token>"
 ```
 
-Tarkista, että token todella välittyi — tämä on ainoa asia jota siirtymä voi
-rikkoa hiljaisesti:
+200 tarkoittaa että token välittyi, 401 että se on eri kuin curlissa annettu.
+
+## Tokenin vaihtaminen
+
+Unit ei sisällä salaisuuksia, joten token vaihdetaan pelkästään env-tiedostosta.
+Aiemmin token kirjoitettiin unitiin käsin ja piilotettiin
+`git update-index --skip-worktree`lla; siitä luovuttiin, koska se esti
+unit-muutosten päätymisen palvelimelle hiljaisesti. **Älä palauta salaisuutta
+unitiin.**
 
 ```bash
-systemctl status mega-empires-backend.service
-curl -s -X POST https://empiresmanager.com/echo \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"env-file test"}'
+printf 'ECHO_TOKEN=%s\n' '<uusi token>' | sudo tee /etc/mega-empires-backend.env >/dev/null
+sudo systemctl restart mega-empires-backend.service
+curl -s -o /dev/null -w '%{http_code}\n' https://empiresmanager.com/state \
+  -H "Authorization: Bearer <uusi token>"
 ```
 
-Vastauksen pitää olla `{"you_sent":"env-file test",...}`. HTTP 500 tarkoittaa,
-ettei `ECHO_TOKEN` päätynyt prosessille; HTTP 401 tarkoittaa, että token on eri
-kuin curlissa annettu.
-
-Tämän jälkeen `git status` on palvelimella puhdas ilman skip-worktree-kikkaa, ja
-repon unit-muutokset menevät perille tavallisella deployllä.
-
-**Varmuuskopiot:** `/etc/mega-empires-backend.env` sisältää salaisuuden. Jos
-palvelimelta otetaan varmuuskopioita, tämä tiedosto ei kuulu samaan paikkaan
-pelitallennusten kanssa.
+200 tarkoittaa että token välittyi, 401 että se on eri kuin curlissa annettu.
+Muista päivittää myös kannettavan `~/.config/mega-empires/config.json`.
 
 ## Reittien tarkistus deployn jälkeen
 
@@ -329,13 +215,11 @@ SSE-virta ei vaadi tokenia, koska se ei kuljeta pelidataa — vain versionumeron
 curl -N https://empiresmanager.com/events
 ```
 
-Selaindiagnostiikka on yhä `https://empiresmanager.com/sse-test`.
-
 ## Miksi restart jumitti
 
 `systemctl restart` jäi useimmiten roikkumaan. Syy ei ollut systemd vaan `/events`:
 se on ääretön vastaus, ja uvicorn odottaa kesken olevien vastausten valmistumista
-ennen kuin se poistuu. Yksikin auki oleva puhelin, `sse-test`-sivu tai `curl -N`
+ennen kuin se poistuu. Yksikin auki oleva puhelin tai `curl -N`
 piti prosessin hengissä, kunnes systemd tappoi sen `TimeoutStopSec`in (oletus 90 s)
 kuluttua. "Ei joka kerta mutta useimmiten" selittyy tällä: se riippui siitä oliko
 virtoja auki.

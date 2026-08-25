@@ -713,7 +713,6 @@ class ScopeTests(HttpTestCase):
             ),
             ("/turn", {"round_number": 2, "current_phase": 1}),
             ("/game", {"player_count": 0, "players": []}),
-            ("/echo", {"message": "hi"}),
         )
         for path, body in cases:
             response = self.client.post(path, json=body, headers=self.player)

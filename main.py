@@ -16,8 +16,6 @@ Reitit:
   POST /players/{civ}/advances      token
   POST /players/{civ}/details       token
   POST /turn                        token
-  POST /echo                        Phase A:n yhteystesti, token
-  GET  /sse-test                    selaindiagnostiikka
 
 **Miksi /events on ilman tokenia:** selaimen `EventSource` ei osaa lähettää
 Authorization-otsaketta. Sen sijaan että token ujutettaisiin kyselyparametriin,
@@ -306,10 +304,6 @@ class TurnBody(BaseModel):
     current_phase: int
     expected_state_version: Optional[int] = None
     actor: str = "http"
-
-
-class EchoBody(BaseModel):
-    message: str
 
 
 # --------------------------------------------------------------------------
@@ -777,20 +771,6 @@ async def admin_release(
     return {"civilization": body.civilization, "claimed": False}
 
 
-@app.post("/echo")
-async def echo(
-    body: EchoBody,
-    principal: Principal = Depends(get_principal),
-) -> dict:
-    require_admin(principal)
-    """Phase A:n yhteystesti. Säilytetty, koska deploy-ohje käyttää sitä."""
-
-    return {
-        "you_sent": body.message,
-        "received_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
 async def event_stream(request: Request):
     """SSE-virta, joka kertoo vain uuden version numeron.
 
@@ -870,9 +850,3 @@ async def player_app() -> HTMLResponse:
     )
 
 
-@app.get("/sse-test", response_class=HTMLResponse)
-async def sse_test() -> HTMLResponse:
-    with open("sse-test.html", encoding="utf-8") as stream:
-        return HTMLResponse(
-            stream.read(), headers={"Cache-Control": "no-store"}
-        )
