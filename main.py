@@ -33,6 +33,7 @@ import secrets
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -40,6 +41,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from mega_empires.models import GameState
+from mega_empires.scoring import calculate_score, visible_rankings
 from mega_empires.service import (
     CommandError,
     CommandResult,
@@ -289,7 +291,24 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
     Kirjoitusoikeus on eri asia ja rajattu erikseen.
     """
 
-    return get_service().snapshot().to_dict()
+    game = get_service().snapshot()
+    data = game.to_dict()
+    # Pisteet lasketaan palvelimella eikä asiakkaassa. Muuten VP-säännöt ja
+    # korttien hintaluokat olisivat olemassa sekä Pythonissa että
+    # JavaScriptissä, ja ne ehtisivät erkaantua ennen kuin kukaan huomaa —
+    # riita pistetilanteesta pöydässä on huono paikka löytää se.
+    rankings = visible_rankings(game.players)
+    for entry, player in zip(data["players"], game.players):
+        score = calculate_score(player)
+        entry["score"] = {
+            "cities": score.cities,
+            "ast": score.ast,
+            "advances": score.advances,
+            "bonus": score.bonus,
+            "total": score.total,
+        }
+        entry["rank"] = rankings[player.civilization]
+    return data
 
 
 @app.post("/players/{civilization}/cities")
@@ -647,6 +666,21 @@ async def events(request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+WEB_DIRECTORY = Path(__file__).resolve().parent / "web"
+
+
+@app.get("/", response_class=HTMLResponse)
+async def player_app() -> str:
+    """Pelaajien sivu.
+
+    Yksi sivu, joka näyttää liittymislomakkeen tai oman rivin sen mukaan onko
+    selaimessa tallennettu token. Näin pöydässä luetaan ääneen vain domain,
+    ei polkua sen perässä.
+    """
+
+    return (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8")
 
 
 @app.get("/sse-test", response_class=HTMLResponse)

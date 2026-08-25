@@ -109,6 +109,36 @@ class StateTests(HttpTestCase):
         self.assertEqual(body["state_version"], 0)
         self.assertEqual(len(body["players"]), 3)
 
+    def test_state_includes_derived_scores_and_ranks(self) -> None:
+        """Pisteet tulevat palvelimelta, jottei sääntöjä tarvitse toistaa JS:ssä."""
+
+        self.client.post(
+            "/players/Hellas/cities", json={"value": 4}, headers=AUTH
+        )
+        self.client.post(
+            "/players/Hellas/ast-step", json={"value": 3}, headers=AUTH
+        )
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["pottery", "wonder_of_the_world"]},
+            headers=AUTH,
+        )
+
+        players = self.client.get("/state", headers=AUTH).json()["players"]
+        hellas = [p for p in players if p["civilization"] == "Hellas"][0]
+
+        # 4 kaupunkia + 3 askelta * 5 VP + (1 VP pottery + 6 VP wonder)
+        self.assertEqual(hellas["score"]["cities"], 4)
+        self.assertEqual(hellas["score"]["ast"], 15)
+        self.assertEqual(hellas["score"]["advances"], 7)
+        self.assertEqual(hellas["score"]["total"], 26)
+        self.assertEqual(hellas["rank"], 1)
+
+    def test_tied_players_share_a_rank(self) -> None:
+        players = self.client.get("/state", headers=AUTH).json()["players"]
+
+        self.assertEqual({p["rank"] for p in players}, {1})
+
     def test_missing_game_returns_503(self) -> None:
         main.set_service(None)
         response = self.client.get("/state", headers=AUTH)
@@ -225,6 +255,23 @@ class _StubRequest:
     async def is_disconnected(self) -> bool:
         self._calls += 1
         return self._calls > self._limit
+
+
+class PlayerAppTests(HttpTestCase):
+    def test_root_serves_the_player_page_without_a_token(self) -> None:
+        """Sivu itsessään ei ole salaisuus; tokenit ovat."""
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("Mega Empires", response.text)
+
+    def test_page_carries_no_token_or_game_data(self) -> None:
+        response = self.client.get("/")
+
+        self.assertNotIn(TOKEN, response.text)
+        self.assertNotIn("Hellas", response.text)
 
 
 class ScopeTests(HttpTestCase):

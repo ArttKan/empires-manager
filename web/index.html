@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101722">
+<title>Mega Empires</title>
+<style>
+  :root {
+    --bg: #101722; --panel: #182231; --panel-alt: #223044;
+    --text: #f5f7fa; --muted: #aeb9c7; --accent: #d6a642; --error: #b94141;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: .95rem; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
+  input[type=text] {
+    width: 100%; padding: 16px; font-size: 1.6rem; text-align: center;
+    letter-spacing: .25em; text-transform: uppercase;
+    background: var(--panel-alt); color: var(--text);
+    border: 1px solid #344258; border-radius: 10px;
+  }
+  button {
+    width: 100%; padding: 16px; font-size: 1.05rem; font-weight: 600;
+    border: 0; border-radius: 10px; margin-top: 14px;
+    background: var(--accent); color: #101010;
+  }
+  button.secondary { background: var(--panel-alt); color: var(--text); }
+  button:disabled { opacity: .5; }
+  .seat {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; padding: 16px; margin-bottom: 8px;
+    background: var(--panel); color: var(--text);
+    border: 1px solid #344258; border-radius: 10px;
+    font-size: 1.1rem; text-align: left;
+  }
+  .seat:disabled { opacity: .45; }
+  .seat .taken { font-size: .8rem; color: var(--muted); }
+  .swatch { width: 14px; height: 34px; border-radius: 4px; margin-right: 12px; }
+  .seat span.name { display: flex; align-items: center; }
+  .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: .95rem; }
+  .msg.error { background: #3a1f1f; color: #ffc9c9; }
+  .msg.info { background: var(--panel); color: var(--muted); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── liittyminen ───────────────────────────────────────────── -->
+  <section id="join-code">
+    <h1>Mega Empires</h1>
+    <p class="sub">Enter the game code shown on the TV.</p>
+    <label for="code">Game code</label>
+    <input id="code" type="text" inputmode="latin" autocomplete="off"
+           autocapitalize="characters" maxlength="8" placeholder="ABCDE">
+    <button id="code-go">Continue</button>
+    <div id="code-msg" class="msg hidden"></div>
+  </section>
+
+  <!-- ── paikan valinta ───────────────────────────────────────── -->
+  <section id="join-seat" class="hidden">
+    <h1>Pick your civilization</h1>
+    <p class="sub">Choose the one you are playing. Ask the game master to free a seat if yours is already taken.</p>
+    <div id="seats"></div>
+    <button id="seat-back" class="secondary">Back</button>
+    <div id="seat-msg" class="msg hidden"></div>
+  </section>
+
+  <!-- ── pelinäkymä (tulossa) ─────────────────────────────────── -->
+  <section id="play" class="hidden">
+    <h1 id="play-civ">—</h1>
+    <p class="sub" id="play-sub">Connected.</p>
+    <div class="msg info">Your row goes here next.</div>
+    <button id="leave" class="secondary">Leave this device</button>
+  </section>
+
+</div>
+<script>
+const STORE_KEY = "megaempires.session";
+
+const el = (id) => document.getElementById(id);
+const show = (id) => {
+  for (const s of ["join-code", "join-seat", "play"]) {
+    el(s).classList.toggle("hidden", s !== id);
+  }
+};
+const message = (id, text, kind) => {
+  const node = el(id);
+  node.textContent = text;
+  node.className = "msg " + (kind || "info");
+  node.classList.toggle("hidden", !text);
+};
+
+// localStorage voi heittää privaatti-ikkunassa tai kun evästeet on estetty.
+const session = {
+  read() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); }
+    catch (e) { return null; }
+  },
+  write(value) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(value)); }
+    catch (e) { /* istunto elää vain tämän välilehden ajan */ }
+  },
+  clear() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+  },
+};
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  let body = null;
+  try { body = await response.json(); } catch (e) {}
+  return { ok: response.ok, status: response.status, body };
+}
+
+let joinCode = "";
+
+async function submitCode() {
+  const code = el("code").value.trim().toUpperCase();
+  if (!code) return;
+  el("code-go").disabled = true;
+  message("code-msg", "Checking…", "info");
+  const { ok, status, body } = await api("/join/roster", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  el("code-go").disabled = false;
+  if (!ok) {
+    message("code-msg",
+      status === 429
+        ? "Too many attempts. Wait a few minutes."
+        : (body && body.detail) || "That code did not work.",
+      "error");
+    return;
+  }
+  message("code-msg", "", "info");
+  joinCode = code;
+  renderSeats(body.players);
+  show("join-seat");
+}
+
+function renderSeats(players) {
+  const box = el("seats");
+  box.innerHTML = "";
+  for (const player of players) {
+    const button = document.createElement("button");
+    button.className = "seat";
+    button.disabled = player.claimed;
+    button.innerHTML =
+      `<span class="name">${player.civilization}</span>` +
+      (player.claimed ? `<span class="taken">taken</span>` : "");
+    button.onclick = () => claim(player.civilization);
+    box.appendChild(button);
+  }
+}
+
+async function claim(civilization) {
+  message("seat-msg", "Joining…", "info");
+  const { ok, status, body } = await api("/join", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: joinCode, civilization }),
+  });
+  if (!ok) {
+    message("seat-msg",
+      status === 409
+        ? `${civilization} was just taken. Ask the game master to free it.`
+        : (body && body.detail) || "Could not join.",
+      "error");
+    // Näytä tuore tilanne: joku muu ehti väliin.
+    const refreshed = await api("/join/roster", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: joinCode }),
+    });
+    if (refreshed.ok) renderSeats(refreshed.body.players);
+    return;
+  }
+  session.write({ token: body.token, civilization: body.civilization });
+  message("seat-msg", "", "info");
+  enterGame();
+}
+
+function enterGame() {
+  const saved = session.read();
+  if (!saved) { show("join-code"); return; }
+  el("play-civ").textContent = saved.civilization;
+  show("play");
+}
+
+el("code-go").onclick = submitCode;
+el("code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitCode();
+});
+el("seat-back").onclick = () => { show("join-code"); };
+el("leave").onclick = () => {
+  if (confirm("Leave this device? You will need the game code to join again.")) {
+    session.clear();
+    show("join-code");
+  }
+};
+
+// Tallennettu istunto vie suoraan pelinäkymään, joten puhelimen lukitus tai
+// selaimen sulkeminen ei vaadi uutta liittymistä.
+if (session.read()) { enterGame(); } else { show("join-code"); }
+</script>
+</body>
+</html>
