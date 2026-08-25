@@ -494,9 +494,11 @@ function render() {
 
   // Lista avautuu aina: omien korttien katsominen ei ole muokkaamista, ja
   // pelaajan pitää nähdä mitä hänellä on missä tahansa vaiheessa.
-  el("cards-open").textContent = gateOpen("cards")
-    ? "Buy Advances"
-    : "View Advances";
+  const canBuy = gateOpen("advances");
+  el("cards-open").textContent = canBuy ? "Buy Advances" : "View Advances";
+  // Kultainen korostus vain kun ostaminen on oikeasti mahdollista; muulloin
+  // vaimea, jottei nappi houkuttele vaiheessa jossa siitä ei ole hyötyä.
+  el("cards-open").classList.toggle("secondary", !canBuy);
   renderAdvanceSummary();
   renderBoard();
 }
