@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -87,6 +88,35 @@ def list_saved_games(directory: Path | None = None) -> tuple[SavedGame, ...]:
             reverse=True,
         )
     )
+
+
+def archive_existing(path: Path) -> Path | None:
+    """Siirrä olemassa oleva tallennus syrjään aikaleimatulla nimellä.
+
+    Palvelin lukee vain yhtä tiedostoa, joten uuden pelin asentaminen korvaisi
+    edellisen lopullisesti eikä palvelimella ole nimettyjä tallennuksia joihin
+    palata. Arkistointi maksaa kilotavuja ja säästää kokonaisen pelin.
+
+    Palauttaa arkistopolun, tai None jos siirrettävää ei ollut.
+    """
+
+    if not path.is_file():
+        return None
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.stem}-{stamp}{path.suffix}")
+    counter = 2
+    while target.exists():
+        target = path.with_name(f"{path.stem}-{stamp}-{counter}{path.suffix}")
+        counter += 1
+    path.replace(target)
+
+    # Komentoloki on tallennuksen sisarustiedosto ja kuuluu samaan peliin. Jos
+    # se jätettäisiin paikalleen, uusi peli jatkaisi edellisen tarkastusjälkeä
+    # samaan tiedostoon ja molemmat menisivät sekaisin.
+    log = path.with_suffix(".jsonl")
+    if log.is_file():
+        log.replace(target.with_suffix(".jsonl"))
+    return target
 
 
 def save_game(game: GameState, path: Path | None = None) -> None:

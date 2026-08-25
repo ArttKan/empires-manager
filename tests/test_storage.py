@@ -7,6 +7,7 @@ from unittest import mock
 
 from mega_empires.models import GameState, PlayerState
 from mega_empires.storage import (
+    archive_existing,
     DATA_DIRECTORY_VARIABLE,
     REPO_SAVE_DIRECTORY,
     data_directory,
@@ -172,6 +173,65 @@ class SaveFormatMigrationTests(unittest.TestCase):
 
         self.assertEqual(restored.state_version, 42)
         self.assertEqual(restored.players[0].version, 7)
+
+
+class ArchiveTests(unittest.TestCase):
+    """Palvelin lukee vain yhtä tiedostoa, joten korvaaminen hävittäisi pelin."""
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.path = Path(self._directory.name) / "nykyinen_peli.json"
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def _write_game(self, cities: int) -> None:
+        save_game(
+            GameState(
+                player_count=1,
+                players=[PlayerState("Hellas", "M", "WEST", cities=cities)],
+                game_mode="WEST",
+            ),
+            self.path,
+        )
+
+    def test_nothing_to_archive_returns_none(self) -> None:
+        self.assertIsNone(archive_existing(self.path))
+
+    def test_existing_game_is_moved_aside(self) -> None:
+        self._write_game(5)
+
+        archived = archive_existing(self.path)
+
+        self.assertIsNotNone(archived)
+        self.assertFalse(self.path.exists())
+        self.assertTrue(archived.is_file())
+        restored = load_game(archived)
+        self.assertEqual(restored.players[0].cities, 5)
+
+    def test_command_log_follows_its_game(self) -> None:
+        """Muuten uusi peli jatkaisi edellisen tarkastusjälkeä."""
+
+        self._write_game(5)
+        log = self.path.with_suffix(".jsonl")
+        log.write_text('{"command": "set_cities"}\n', encoding="utf-8")
+
+        archived = archive_existing(self.path)
+
+        self.assertFalse(log.exists())
+        self.assertTrue(archived.with_suffix(".jsonl").is_file())
+
+    def test_two_archives_in_the_same_second_do_not_collide(self) -> None:
+        self._write_game(1)
+        first = archive_existing(self.path)
+        self._write_game(2)
+        second = archive_existing(self.path)
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.is_file())
+        self.assertTrue(second.is_file())
+        self.assertEqual(load_game(first).players[0].cities, 1)
+        self.assertEqual(load_game(second).players[0].cities, 2)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from mega_empires.credits import (
+    advance_price,
+    color_credits,
+    flexible_credit_entitlement,
+)
+from mega_empires.data import ADVANCES
 from mega_empires.models import GameState
 from mega_empires.scoring import calculate_score, visible_rankings
 from mega_empires.service import (
@@ -50,7 +56,12 @@ from mega_empires.service import (
     UnknownPlayer,
     VersionConflict,
 )
-from mega_empires.storage import data_directory, default_save_path, load_game
+from mega_empires.storage import (
+    archive_existing,
+    data_directory,
+    default_save_path,
+    load_game,
+)
 from mega_empires.tokens import Principal, TokenStore, tokens_path
 
 app = FastAPI(title="Mega Empires backend")
@@ -311,6 +322,56 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
     return data
 
 
+@app.get("/players/{civilization}/advances")
+async def advance_catalogue(
+    civilization: str,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    """Advance-kortit hintoineen tälle pelaajalle.
+
+    Hinnat lasketaan palvelimella, koska ne riippuvat värikrediiteistä ja
+    referenssitaulukon rivialennuksista — `credits.py`:n logiikasta, jota ei
+    haluta toistaa JavaScriptissä. Luettavissa millä tahansa kelvollisella
+    tokenilla; hinnat johtuvat tilasta joka on muutenkin näkyvissä.
+    """
+
+    game = get_service().snapshot()
+    player = next(
+        (p for p in game.players if p.civilization == civilization), None
+    )
+    if player is None:
+        raise HTTPException(
+            status_code=404, detail=f"No player for civilization {civilization!r}."
+        )
+
+    owned = set(player.advances)
+    totals = color_credits(player, game.player_count)
+    entries = []
+    for advance in ADVANCES:
+        price = advance_price(advance, player, game.player_count)
+        entries.append(
+            {
+                "id": advance.id,
+                "name": advance.name,
+                "cost": advance.cost,
+                "vp": advance.victory_points,
+                "groups": list(advance.groups),
+                "owned": advance.id in owned,
+                "effective_cost": price.effective_cost,
+                "color_discount": price.color_discount,
+                "row_discount": price.special_discount,
+                "applied_group": price.applied_group,
+            }
+        )
+    return {
+        "civilization": civilization,
+        "credits": totals,
+        "flexible_total": flexible_credit_entitlement(list(player.advances)),
+        "flexible_allocated": dict(player.flexible_credits),
+        "advances": entries,
+    }
+
+
 @app.post("/players/{civilization}/cities")
 async def set_cities(
     civilization: str,
@@ -462,6 +523,10 @@ async def create_game(
 
     path = default_save_path()
     async with _lock:
+        # Edellinen peli siirretään syrjään ennen korvaamista: palvelin lukee
+        # vain yhtä tiedostoa, joten ilman tätä vahinkopainallus tuhoaisi
+        # käynnissä olevan pelin pysyvästi.
+        archived = archive_existing(path)
         service = LocalGameService(game, save_path=path)
         service.save()
         set_service(service)
@@ -477,7 +542,11 @@ async def create_game(
         version = service.snapshot().state_version
 
     await broadcast(version)
-    return {"state_version": version, "player_count": game.player_count}
+    return {
+        "state_version": version,
+        "player_count": game.player_count,
+        "archived": archived.name if archived else None,
+    }
 
 
 class JoinBody(BaseModel):

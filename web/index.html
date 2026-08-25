@@ -48,6 +48,73 @@
   .msg.error { background: #3a1f1f; color: #ffc9c9; }
   .msg.info { background: var(--panel); color: var(--muted); }
   .hidden { display: none; }
+
+  /* ── oma rivi ─────────────────────────────────────────────── */
+  .me { background: var(--panel); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .me .civ { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .me .who { color: var(--muted); font-size: .95rem; margin-top: 2px; }
+  .me .score { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
+  .me .total { font-size: 2.4rem; font-weight: 700; color: var(--accent); }
+  .me .parts { color: var(--muted); font-size: .85rem; }
+  .control { background: var(--panel); border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
+  .control .label { color: var(--muted); font-size: .85rem; margin-bottom: 10px; }
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper button {
+    width: 68px; height: 68px; margin: 0; font-size: 2rem; font-weight: 700;
+    background: var(--panel-alt); color: var(--text); border-radius: 14px;
+  }
+  .stepper button:active { background: #31445f; }
+  .stepper .value { flex: 1; text-align: center; font-size: 2.2rem; font-weight: 700; }
+  .control input[type=number] {
+    width: 100%; padding: 14px; font-size: 2rem; text-align: center;
+    background: var(--panel-alt); color: var(--text);
+    border: 1px solid #344258; border-radius: 12px;
+  }
+  .standings { background: var(--panel); border-radius: 12px; padding: 8px 4px; margin: 20px 0 12px; }
+  .standings .row {
+    display: grid; grid-template-columns: 34px 1fr auto;
+    align-items: center; padding: 9px 14px; font-size: .95rem;
+  }
+  .standings .row.self { background: var(--panel-alt); border-radius: 8px; font-weight: 600; }
+  .standings .rank { color: var(--muted); }
+  .standings .pts { color: var(--accent); font-weight: 600; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; margin: -20px -16px 14px;
+    padding: 7px 16px; font-size: .8rem; text-align: center;
+    background: var(--panel-alt); color: var(--muted);
+  }
+  .bar.warn { background: #4a3a1c; color: #ffe0a3; }
+  .bar.bad { background: #3a1f1f; color: #ffc9c9; }
+
+  /* ── Civilization Advances ────────────────────────────────── */
+  .credits { display: flex; gap: 6px; margin-bottom: 14px; }
+  .credits div {
+    flex: 1; text-align: center; padding: 8px 2px; border-radius: 8px;
+    font-size: .75rem; font-weight: 700; color: #101010;
+  }
+  .adv {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 12px 14px; margin-bottom: 6px; text-align: left;
+    background: var(--panel); color: var(--text);
+    border: 1px solid #344258; border-left-width: 6px; border-radius: 10px;
+  }
+  .adv.owned { border-color: var(--accent); background: var(--panel-alt); }
+  .adv .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
+  .adv .body { flex: 1; min-width: 0; }
+  .adv .nm { font-size: 1rem; }
+  .adv .meta { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+  .adv .price { text-align: right; font-variant-numeric: tabular-nums; }
+  .adv .price .now { font-size: 1.05rem; font-weight: 700; }
+  .adv .price .was { color: var(--muted); font-size: .75rem; text-decoration: line-through; }
+  .adv-head {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; margin-bottom: 12px;
+  }
+  .adv-head button { width: auto; margin: 0; padding: 12px 18px; }
+  .sticky-save {
+    position: sticky; bottom: 0; margin: 0 -16px; padding: 12px 16px;
+    background: linear-gradient(transparent, var(--bg) 22%);
+  }
 </style>
 </head>
 <body>
@@ -74,10 +141,57 @@
 
   <!-- ── pelinäkymä (tulossa) ─────────────────────────────────── -->
   <section id="play" class="hidden">
-    <h1 id="play-civ">—</h1>
-    <p class="sub" id="play-sub">Connected.</p>
-    <div class="msg info">Your row goes here next.</div>
+    <div class="bar" id="bar">Connecting…</div>
+
+    <div class="me">
+      <div class="civ" id="play-civ">—</div>
+      <div class="who" id="play-who"></div>
+      <div class="score">
+        <span class="total" id="play-total">0</span>
+        <span class="parts" id="play-parts"></span>
+      </div>
+    </div>
+
+    <div class="control">
+      <div class="label">Cities</div>
+      <div class="stepper">
+        <button id="cities-down" aria-label="One city fewer">−</button>
+        <div class="value" id="cities-value">0</div>
+        <button id="cities-up" aria-label="One city more">+</button>
+      </div>
+    </div>
+
+    <div class="control">
+      <div class="label">Census — population tokens on the board</div>
+      <input id="census" type="number" inputmode="numeric" min="0" max="55">
+    </div>
+
+    <div class="control">
+      <div class="label">Civilization Advances</div>
+      <div id="adv-summary" class="stepper" style="font-size:1.1rem">—</div>
+      <button id="adv-open" class="secondary" style="margin-top:12px">Edit Advances</button>
+    </div>
+
+    <div class="standings" id="standings"></div>
     <button id="leave" class="secondary">Leave this device</button>
+    <div id="play-msg" class="msg hidden"></div>
+  </section>
+
+  <!-- ── Civilization Advances ────────────────────────────────── -->
+  <section id="advances" class="hidden">
+    <div class="adv-head">
+      <div>
+        <h1 style="margin:0">Advances</h1>
+        <p class="sub" style="margin:2px 0 0" id="adv-sub"></p>
+      </div>
+      <button id="adv-cancel" class="secondary">Cancel</button>
+    </div>
+    <div class="credits" id="adv-credits"></div>
+    <div id="adv-list"></div>
+    <div class="sticky-save">
+      <button id="adv-save">Save</button>
+    </div>
+    <div id="adv-msg" class="msg hidden"></div>
   </section>
 
 </div>
@@ -86,7 +200,7 @@ const STORE_KEY = "megaempires.session";
 
 const el = (id) => document.getElementById(id);
 const show = (id) => {
-  for (const s of ["join-code", "join-seat", "play"]) {
+  for (const s of ["join-code", "join-seat", "play", "advances"]) {
     el(s).classList.toggle("hidden", s !== id);
   }
 };
@@ -192,12 +306,299 @@ async function claim(civilization) {
   enterGame();
 }
 
+// ── pelinäkymä ────────────────────────────────────────────────
+const CENSUS_DEBOUNCE_MS = 400;
+const POLL_FALLBACK_MS = 15000;
+
+let me = null;          // oma rivi viimeisimmästä tilannekuvasta
+let game = null;        // koko tilannekuva
+let censusTimer = null;
+let events = null;
+
+function authHeaders() {
+  const saved = session.read();
+  return saved ? { Authorization: "Bearer " + saved.token } : {};
+}
+
+function bar(text, kind) {
+  const node = el("bar");
+  node.textContent = text;
+  node.className = "bar" + (kind ? " " + kind : "");
+}
+
+async function refresh() {
+  const saved = session.read();
+  if (!saved) return;
+  const { ok, status, body } = await api("/state", { headers: authHeaders() });
+  if (status === 401) {
+    // Token ei enää kelpaa — tavallisimmin uusi peli on aloitettu.
+    session.clear();
+    if (events) { events.close(); events = null; }
+    message("code-msg", "This game has ended. Ask for the new code.", "info");
+    show("join-code");
+    return;
+  }
+  if (!ok) {
+    bar(status === 503 ? "No game on the server" : "Reconnecting…", "warn");
+    return;
+  }
+  game = body;
+  me = body.players.find((p) => p.civilization === saved.civilization) || null;
+  if (!me) {
+    bar(saved.civilization + " is not in this game", "bad");
+    return;
+  }
+  bar("Turn " + body.round_number + " · phase " + body.current_phase);
+  render();
+}
+
+function render() {
+  el("play-civ").textContent = me.civilization;
+  el("play-who").textContent = me.nickname
+    ? me.nickname + " · " + me.block
+    : me.block;
+  el("play-total").textContent = me.score.total;
+  el("play-parts").textContent =
+    "#" + me.rank + "   " + me.score.cities + " cities + " +
+    me.score.ast + " A.S.T. + " + me.score.advances + " advances" +
+    (me.score.bonus ? " + " + me.score.bonus + " bonus" : "");
+  el("cities-value").textContent = me.cities;
+
+  // Älä kirjoita kentän päälle kesken kirjoittamisen.
+  const census = el("census");
+  if (document.activeElement !== census && censusTimer === null) {
+    census.value = me.census;
+  }
+  renderAdvanceSummary();
+  renderStandings();
+}
+
+function renderStandings() {
+  const box = el("standings");
+  const ordered = [...game.players].sort(
+    (a, b) => b.score.total - a.score.total || a.rank - b.rank
+  );
+  box.innerHTML = "";
+  for (const player of ordered) {
+    const row = document.createElement("div");
+    row.className = "row" + (player.civilization === me.civilization ? " self" : "");
+    row.innerHTML =
+      `<span class="rank">${player.rank}</span>` +
+      `<span>${player.civilization}${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
+      `<span class="pts">${player.score.total}</span>`;
+    box.appendChild(row);
+  }
+}
+
+async function command(route, payload) {
+  if (!me) return;
+  const saved = session.read();
+  const { ok, status, body } = await api(
+    "/players/" + encodeURIComponent(saved.civilization) + "/" + route,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      // expected_version estää sen, että hidas napautus yliajaisi
+      // kannettavalta juuri tehdyn korjauksen.
+      body: JSON.stringify({ ...payload, expected_version: me.version, actor: "phone" }),
+    }
+  );
+  if (ok) {
+    message("play-msg", "", "info");
+    await refresh();
+    return;
+  }
+  if (status === 409) {
+    message("play-msg",
+      "Someone else changed your row first — the numbers below are current. "
+      + "Repeat your change if it is still needed.", "error");
+    await refresh();
+    return;
+  }
+  if (status === 401) { await refresh(); return; }
+  message("play-msg",
+    status === 403 ? "You cannot change that." : "Could not save. Check your connection.",
+    "error");
+}
+
+function changeCities(delta) {
+  if (!me) return;
+  const target = Math.max(0, Math.min(9, me.cities + delta));
+  if (target === me.cities) return;
+  el("cities-value").textContent = target;   // välitön palaute napautukseen
+  command("cities", { value: target });
+}
+
+function scheduleCensus() {
+  if (censusTimer !== null) clearTimeout(censusTimer);
+  censusTimer = setTimeout(() => {
+    censusTimer = null;
+    const raw = el("census").value.trim();
+    if (raw === "") return;
+    const value = Math.max(0, Math.min(55, parseInt(raw, 10) || 0));
+    if (me && value === me.census) return;
+    command("census", { value });
+  }, CENSUS_DEBOUNCE_MS);
+}
+
+function listen() {
+  // Virta kertoo vain että jokin muuttui; varsinainen tila haetaan tokenilla.
+  if (events) events.close();
+  events = new EventSource("/events");
+  events.addEventListener("state", () => refresh());
+  events.onopen = () => refresh();
+  events.onerror = () => bar("Reconnecting…", "warn");
+  // Puhelin katkaisee virran näytön lukituessa; varakysely varmistaa
+  // että näkymä on tuore myös jos yhteys ei palaa itsestään.
+  setInterval(() => { if (document.visibilityState === "visible") refresh(); },
+              POLL_FALLBACK_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refresh();
+  });
+}
+
 function enterGame() {
   const saved = session.read();
   if (!saved) { show("join-code"); return; }
   el("play-civ").textContent = saved.civilization;
   show("play");
+  refresh();
+  listen();
 }
+
+// ── Civilization Advances ─────────────────────────────────────
+// Korttien värit vastaavat työpöytäsovelluksen ryhmävärejä, jotta sama kortti
+// näyttää samalta kummallakin ruudulla.
+const GROUP_COLORS = {
+  ART: "#4471c4", CIVIC: "#d74343", CRAFT: "#ec7c30",
+  RELIGION: "#d8bd27", SCIENCE: "#6fac46",
+};
+const GROUP_LABELS = {
+  ART: "Arts", CIVIC: "Civics", CRAFT: "Crafts",
+  RELIGION: "Religions", SCIENCE: "Sciences",
+};
+
+let catalogue = null;
+let selection = null;   // muokattava valinta; tallennetaan vasta Savella
+
+async function openAdvances() {
+  const saved = session.read();
+  message("adv-msg", "", "info");
+  const { ok, body } = await api(
+    "/players/" + encodeURIComponent(saved.civilization) + "/advances",
+    { headers: authHeaders() }
+  );
+  if (!ok) {
+    message("play-msg", "Could not load the Advances list.", "error");
+    return;
+  }
+  catalogue = body;
+  selection = new Set(body.advances.filter((a) => a.owned).map((a) => a.id));
+  renderAdvances();
+  show("advances");
+  window.scrollTo(0, 0);
+}
+
+function renderCredits() {
+  const box = el("adv-credits");
+  box.innerHTML = "";
+  for (const group of ["ART", "CIVIC", "CRAFT", "RELIGION", "SCIENCE"]) {
+    const cell = document.createElement("div");
+    cell.style.background = GROUP_COLORS[group];
+    cell.textContent = catalogue.credits[group];
+    cell.title = GROUP_LABELS[group];
+    box.appendChild(cell);
+  }
+}
+
+function renderAdvances() {
+  renderCredits();
+  const owned = catalogue.advances.filter((a) => selection.has(a.id));
+  const points = owned.reduce((sum, a) => sum + a.vp, 0);
+  el("adv-sub").textContent =
+    owned.length + " selected · " + points + " VP";
+
+  const list = el("adv-list");
+  list.innerHTML = "";
+  for (const advance of catalogue.advances) {
+    const chosen = selection.has(advance.id);
+    const button = document.createElement("button");
+    button.className = "adv" + (chosen ? " owned" : "");
+    button.style.borderLeftColor = GROUP_COLORS[advance.groups[0]];
+
+    // Hinta näytetään vain kortille jota ei vielä omista: omistetulla se on
+    // maksettu eikä muutu miksikään.
+    const discounted = advance.effective_cost < advance.cost;
+    const price = chosen
+      ? `<div class="price"><div class="now">${advance.vp} VP</div></div>`
+      : `<div class="price">` +
+        (discounted ? `<div class="was">${advance.cost}</div>` : "") +
+        `<div class="now">${advance.effective_cost}</div></div>`;
+
+    button.innerHTML =
+      `<span class="tick">${chosen ? "✓" : ""}</span>` +
+      `<span class="body">` +
+        `<div class="nm">${advance.name}</div>` +
+        `<div class="meta">${advance.groups.map((g) => GROUP_LABELS[g]).join(" · ")}` +
+        ` · ${advance.vp} VP</div>` +
+      `</span>` + price;
+    button.onclick = () => {
+      if (selection.has(advance.id)) selection.delete(advance.id);
+      else selection.add(advance.id);
+      renderAdvances();
+    };
+    list.appendChild(button);
+  }
+}
+
+async function saveAdvances() {
+  el("adv-save").disabled = true;
+  message("adv-msg", "Saving…", "info");
+  const saved = session.read();
+  const { ok, status } = await api(
+    "/players/" + encodeURIComponent(saved.civilization) + "/advances",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        advances: [...selection],
+        expected_version: me ? me.version : null,
+        actor: "phone",
+      }),
+    }
+  );
+  el("adv-save").disabled = false;
+  if (ok) {
+    await refresh();
+    show("play");
+    return;
+  }
+  if (status === 409) {
+    message("adv-msg",
+      "Someone else changed your row first. Reopening with current values.",
+      "error");
+    await refresh();
+    await openAdvances();
+    return;
+  }
+  message("adv-msg", "Could not save. Check your connection.", "error");
+}
+
+function renderAdvanceSummary() {
+  if (!me) return;
+  const count = me.advances.length;
+  el("adv-summary").textContent =
+    count === 0 ? "none yet" : count + " cards · " + me.score.advances + " VP";
+}
+
+el("adv-open").onclick = openAdvances;
+el("adv-cancel").onclick = () => { show("play"); };
+el("adv-save").onclick = saveAdvances;
+
+el("cities-down").onclick = () => changeCities(-1);
+el("cities-up").onclick = () => changeCities(1);
+el("census").addEventListener("input", scheduleCensus);
+el("census").addEventListener("blur", () => { if (me) el("census").value = me.census; });
 
 el("code-go").onclick = submitCode;
 el("code").addEventListener("keydown", (e) => {

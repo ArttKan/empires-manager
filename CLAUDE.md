@@ -275,6 +275,13 @@ checkout and the test suite still run offline.
 - **`POST /game`** installs a wizard-built `GameState` and swaps the cached
   service, so changing games needs no SSH and no restart. Version counters are
   reset on install so a new game cannot inherit the old one's.
+- **The server has exactly one game**, at `MEGA_EMPIRES_DATA_DIR/nykyinen_peli.json`.
+  Named saves are a desktop-only concept; `main.py` never calls `list_saved_games()`.
+  Dropping other `.json` files in the data directory does nothing.
+- **`POST /game` archives the previous game first** (`nykyinen_peli-<timestamp>.json`)
+  along with its `.jsonl` command log, because overwriting the one file the server
+  reads would otherwise destroy a live game permanently. The log moves with its
+  game — leaving it behind would splice two games into one audit trail.
 
 Next: the player PWA. Blocked on authorization — there is currently **one shared
 token with full authority**, so handing it to phones would let every player edit

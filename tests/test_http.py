@@ -274,6 +274,116 @@ class PlayerAppTests(HttpTestCase):
         self.assertNotIn("Hellas", response.text)
 
 
+class AdvanceCatalogueTests(HttpTestCase):
+    """Hinnat lasketaan palvelimella, jottei credits.py:tä toisteta JS:ssä."""
+
+    def test_catalogue_lists_every_advance(self) -> None:
+        body = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+
+        self.assertEqual(len(body["advances"]), 51)
+        first = body["advances"][0]
+        self.assertEqual(
+            set(first),
+            {
+                "id", "name", "cost", "vp", "groups", "owned",
+                "effective_cost", "color_discount", "row_discount",
+                "applied_group",
+            },
+        )
+
+    def test_owned_cards_are_marked(self) -> None:
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["pottery", "masonry"]},
+            headers=AUTH,
+        )
+
+        body = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+
+        owned = {a["id"] for a in body["advances"] if a["owned"]}
+        self.assertEqual(owned, {"pottery", "masonry"})
+
+    def test_colour_credits_lower_the_effective_price(self) -> None:
+        """Ostettu kortti antaa värikrediittiä, joka näkyy hinnoissa."""
+
+        catalogue = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+        before = {a["id"]: a["effective_cost"] for a in catalogue["advances"]}
+
+        # Pottery antaa CRAFT 10 / ART 5.
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["pottery"]},
+            headers=AUTH,
+        )
+        catalogue = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+        after = {a["id"]: a["effective_cost"] for a in catalogue["advances"]}
+
+        # 3 pelaajan pelissä alkukrediitti on 10 per väri, ja Pottery tuo
+        # CRAFTiin 10 lisää. Endpoint laskee siis myös alkukrediitit mukaan.
+        self.assertEqual(catalogue["credits"]["CRAFT"], 20)
+        self.assertEqual(catalogue["credits"]["ART"], 15)
+        # Cloth Making on CRAFT, joten sen hinta laski.
+        self.assertLess(after["cloth_making"], before["cloth_making"])
+        self.assertEqual(after["cloth_making"], 30)
+
+    def test_row_chain_discount_is_reported_separately(self) -> None:
+        """Referenssirivin 1 VP -> 3 VP antaa 10 lisäalennusta."""
+
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism"]},
+            headers=AUTH,
+        )
+
+        body = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+        monument = [a for a in body["advances"] if a["id"] == "monument"][0]
+
+        self.assertEqual(monument["row_discount"], 10)
+
+    def test_flexible_credit_entitlement_is_reported(self) -> None:
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["written_record", "monument"]},
+            headers=AUTH,
+        )
+
+        body = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+
+        self.assertEqual(body["flexible_total"], 30)
+
+    def test_player_may_read_their_own_catalogue(self) -> None:
+        store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+        token = store.claim(store.join_code, "Hellas", "now")
+
+        response = self.client.get(
+            "/players/Hellas/advances",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_unknown_civilization_is_404(self) -> None:
+        self.assertEqual(
+            self.client.get("/players/Atlantis/advances", headers=AUTH).status_code,
+            404,
+        )
+
+
 class ScopeTests(HttpTestCase):
     """Puhelin saa muuttaa vain omaa riviään ja vain sovituilla komennoilla."""
 
@@ -569,6 +679,42 @@ class CreateGameTests(HttpTestCase):
         state = self.client.get("/state", headers=AUTH).json()
         self.assertEqual(state["state_version"], 0)
         self.assertEqual(state["players"][0]["version"], 0)
+
+    def test_create_archives_the_previous_game(self) -> None:
+        """Uusi peli ei saa hävittää käynnissä olevaa lopullisesti."""
+
+        self.client.post(
+            "/players/Hellas/cities", json={"value": 6}, headers=AUTH
+        )
+        directory = Path(self._directory.name)
+        live = directory / "nykyinen_peli.json"
+        # Aja komento myös oletuspolkuun, jotta arkistoitavaa on.
+        self.client.post("/game", json=self._payload(), headers=AUTH)
+        self.client.post(
+            "/players/Saba/cities", json={"value": 3}, headers=AUTH
+        )
+
+        response = self.client.post("/game", json=self._payload(), headers=AUTH)
+
+        archived = response.json()["archived"]
+        self.assertIsNotNone(archived)
+        self.assertTrue((directory / archived).is_file())
+        previous = json.loads((directory / archived).read_text(encoding="utf-8"))
+        saba = [p for p in previous["players"] if p["civilization"] == "Saba"][0]
+        self.assertEqual(saba["cities"], 3)
+        # Uusi peli alkaa puhtaalta pöydältä.
+        self.assertEqual(
+            json.loads(live.read_text(encoding="utf-8"))["state_version"], 0
+        )
+
+    def test_first_game_has_nothing_to_archive(self) -> None:
+        (Path(self._directory.name) / "nykyinen_peli.json").unlink(
+            missing_ok=True
+        )
+
+        response = self.client.post("/game", json=self._payload(), headers=AUTH)
+
+        self.assertIsNone(response.json()["archived"])
 
     def test_create_needs_a_token(self) -> None:
         response = self.client.post("/game", json=self._payload())
