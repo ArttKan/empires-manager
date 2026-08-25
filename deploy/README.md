@@ -91,7 +91,7 @@ kopioida tallennuksia käsin.
 Kehityskoneelta ensin GitHubiin:
 
 ```bash
-git push origin master
+git push origin main
 ```
 
 Sitten palvelimella:

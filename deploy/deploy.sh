@@ -6,7 +6,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/home/megaempires/mega-empires-backend}"
 VENV_DIR="${VENV_DIR:-/home/megaempires/venv}"
 SERVICE="${SERVICE:-mega-empires-backend.service}"
-BRANCH="${BRANCH:-master}"
+BRANCH="${BRANCH:-main}"
 SYSTEMCTL="/usr/bin/systemctl"
 
 INSTALLED_UNIT="/etc/systemd/system/$SERVICE"
