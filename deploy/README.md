@@ -331,6 +331,39 @@ curl -N https://empiresmanager.com/events
 
 Selaindiagnostiikka on yhä `https://empiresmanager.com/sse-test`.
 
+## Miksi restart jumitti
+
+`systemctl restart` jäi useimmiten roikkumaan. Syy ei ollut systemd vaan `/events`:
+se on ääretön vastaus, ja uvicorn odottaa kesken olevien vastausten valmistumista
+ennen kuin se poistuu. Yksikin auki oleva puhelin, `sse-test`-sivu tai `curl -N`
+piti prosessin hengissä, kunnes systemd tappoi sen `TimeoutStopSec`in (oletus 90 s)
+kuluttua. "Ei joka kerta mutta useimmiten" selittyy tällä: se riippui siitä oliko
+virtoja auki.
+
+**Sovelluksesta tätä ei voi korjata.** uvicorn ajaa lifespan-sammutuksen vasta
+pyyntöjen valuttamisen jälkeen, joten käsittelijä joka sulkisi virrat odottaa itse
+niiden sulkeutumista. Kokeiltu ja mitattu: prosessi ei poistunut 40 sekunnissakaan.
+
+Ratkaisu on unitissa:
+
+```ini
+ExecStart=… --timeout-graceful-shutdown 5
+TimeoutStopSec=20
+```
+
+Mitattuna poistuminen kestää tällöin ~5 s myös kolmella avoimella virralla.
+`TimeoutStopSec` on varmistus siltä varalta että prosessi ei silti poistu.
+
+**Tämä muutos on unitissa, joten se vaatii unitin kopioinnin palvelimelle** —
+pelkkä `deploy.sh` ei riitä:
+
+```bash
+cd /home/megaempires/mega-empires-backend
+sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart mega-empires-backend.service
+```
+
 ## Vianetsintä
 
 ```bash

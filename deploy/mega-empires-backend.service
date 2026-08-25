@@ -43,9 +43,16 @@ EnvironmentFile=/etc/mega-empires-backend.env
 
 ; Sovellus on main.py ja se palvelee myös sse-test.html-tiedoston suhteellisella
 ; polulla, joten WorkingDirectory on merkityksellinen eikä vain kosmeettinen.
-ExecStart=/home/megaempires/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+; --timeout-graceful-shutdown on pakollinen: /events on ääretön vastaus, ja ilman
+; sitä uvicorn jää odottamaan avoimia SSE-virtoja eikä poistu. Yksikin auki oleva
+; puhelin jumittaa `systemctl restart`in TimeoutStopSecin loppuun asti.
+ExecStart=/home/megaempires/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 \
+    --timeout-graceful-shutdown 5
 Restart=always
 RestartSec=2
+; Varmistus siltä varalta että prosessi ei silti poistu: systemd tappaa sen
+; 20 sekunnissa oletusarvoisen 90:n sijaan.
+TimeoutStopSec=20
 
 ; Kun tallennukset siirtyivät /var/lib-hakemistoon, palvelu ei enää tarvitse
 ; kirjoitusoikeutta omaan hakemistoonsa: ajossa oleva sovellus ei voi muuttaa

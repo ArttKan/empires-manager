@@ -65,8 +65,6 @@ from mega_empires.storage import (
 )
 from mega_empires.tokens import Principal, TokenStore, tokens_path
 
-app = FastAPI(title="Mega Empires backend")
-
 # ECHO_TOKEN on Phase A:n nimi. Uusi nimi on kuvaavampi, mutta vanha kelpaa yhä,
 # jottei palvelimen /etc/mega-empires-backend.env vaadi samanaikaista muutosta.
 TOKEN = os.environ.get("MEGA_EMPIRES_TOKEN") or os.environ.get("ECHO_TOKEN")
@@ -80,6 +78,14 @@ _service: Optional[LocalGameService] = None
 _tokens: Optional[TokenStore] = None
 _lock = asyncio.Lock()
 _subscribers: "set[asyncio.Queue]" = set()
+
+# HUOM sammutuksesta: `/events` on ääretön vastaus, ja uvicorn odottaa kesken
+# olevien vastausten valmistumista ennen poistumista. Yksikin auki oleva puhelin
+# jumittaa siis `systemctl restart`in. Tätä **ei voi korjata sovelluksesta**:
+# uvicorn ajaa lifespan-sammutuksen vasta pyyntöjen valuttamisen jälkeen, joten
+# käsittelijä joka sulkisi virrat odottaa itse niiden sulkeutumista.
+# Ratkaisu on ExecStartin --timeout-graceful-shutdown; ks. deploy/README.md.
+app = FastAPI(title="Mega Empires backend")
 
 
 # --------------------------------------------------------------------------

@@ -320,6 +320,18 @@ seat picker, then the player's own row with a Scoreboard tab.
   when the sheet opens — re-sorting on every tap would move the next card out from
   under the player's thumb.
 
+**`/events` blocks shutdown without `--timeout-graceful-shutdown`.** It is an
+infinite response, and uvicorn drains in-flight requests before exiting, so a single
+open phone hangs `systemctl restart` until systemd's `TimeoutStopSec`. **This cannot
+be fixed in the app** — uvicorn runs lifespan shutdown *after* draining, so a handler
+that would close the streams is itself queued behind them; measured at over 40 s with
+no exit. The flag lives in the unit's `ExecStart` and must stay there, with
+`TimeoutStopSec=20` as a backstop.
+
+**Known gap:** `get_service()` caches the loaded save, so a game replaced *on disk*
+still needs a restart — `POST /game` is the supported way to change games and does
+not.
+
 Remaining: the manifest and service worker for home-screen install, and the lobby
 view in the desktop app (join code and claim status on the TV, release a seat).
 
