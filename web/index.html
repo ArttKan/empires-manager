@@ -69,6 +69,8 @@
   }
   .stepper button:active { background: #31445f; }
   .stepper .value { flex: 1; text-align: center; font-size: 2.2rem; font-weight: 700; }
+  .control.locked { opacity: .55; }
+  .control.locked input, .control.locked button { pointer-events: none; }
   .control input[type=number] {
     width: 100%; padding: 14px; font-size: 2rem; text-align: center;
     background: var(--panel-alt); color: var(--text);
@@ -115,6 +117,39 @@
     gap: 10px; margin-bottom: 12px;
   }
   .adv-head button { width: auto; margin: 0; padding: 12px 18px; }
+  /* ── välilehdet ───────────────────────────────────────────── */
+  body.tabbed { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: flex; background: var(--panel);
+    border-top: 1px solid #344258;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabs button {
+    flex: 1; margin: 0; border-radius: 0; padding: 16px 8px;
+    background: transparent; color: var(--muted);
+    font-size: .95rem; font-weight: 600;
+  }
+  .tabs button.active { color: var(--accent); box-shadow: inset 0 2px 0 var(--accent); }
+
+  /* ── pistetaulu ───────────────────────────────────────────── */
+  .board { background: var(--panel); border-radius: 12px; padding: 6px 0; }
+  .board .row {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 38px 44px 46px;
+    align-items: center; gap: 4px; padding: 10px 12px;
+    font-size: .95rem; font-variant-numeric: tabular-nums;
+  }
+  .board .row.head {
+    padding: 6px 12px; font-size: .7rem; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid #344258;
+  }
+  .board .row.self { background: var(--panel-alt); font-weight: 600; }
+  .board .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board .rank { color: var(--muted); }
+  .board .num { text-align: right; color: var(--muted); }
+  .board .pts { text-align: right; color: var(--accent); font-weight: 700; }
+
   .sticky-save {
     position: sticky; bottom: 0; margin: 0 -16px; padding: 12px 16px;
     background: linear-gradient(transparent, var(--bg) 22%);
@@ -166,20 +201,25 @@
       </div>
     </div>
 
-    <div class="control">
-      <div class="label">Census — population tokens on the board</div>
+    <div class="control" id="census-box">
+      <div class="label" id="census-label">Census — population tokens on the board</div>
       <input id="census" type="number" inputmode="numeric" min="0" max="55">
     </div>
 
-    <div class="control">
+    <div class="control" id="adv-box">
       <div class="label">Civilization Advances</div>
       <div id="adv-summary" class="stepper" style="font-size:1.1rem">—</div>
       <button id="adv-open" class="secondary" style="margin-top:12px">Buy Advances</button>
     </div>
 
-    <div class="standings" id="standings"></div>
     <button id="leave" class="secondary">Leave this device</button>
     <div id="play-msg" class="msg hidden"></div>
+  </section>
+
+  <!-- ── pistetaulu ───────────────────────────────────────────── -->
+  <section id="board" class="hidden">
+    <div class="bar" id="board-bar">—</div>
+    <div class="board" id="board-list"></div>
   </section>
 
   <!-- ── Civilization Advances ────────────────────────────────── -->
@@ -199,14 +239,30 @@
     <div id="adv-msg" class="msg hidden"></div>
   </section>
 
+  <nav class="tabs hidden" id="tabs">
+    <button id="tab-me" class="active">My row</button>
+    <button id="tab-board">Scoreboard</button>
+  </nav>
+
 </div>
 <script>
 const STORE_KEY = "megaempires.session";
 
 const el = (id) => document.getElementById(id);
+const TABBED = ["play", "board"];   // näkymät joissa välilehtipalkki näkyy
+
 const show = (id) => {
-  for (const s of ["join-code", "join-seat", "play", "advances"]) {
+  for (const s of ["join-code", "join-seat", "play", "board", "advances"]) {
     el(s).classList.toggle("hidden", s !== id);
+  }
+  // Palkki piilotetaan liittymisen ja Advances-arkin ajaksi: kesken oston
+  // välilehden vaihtaminen hukkaisi valinnat.
+  const tabbed = TABBED.includes(id);
+  el("tabs").classList.toggle("hidden", !tabbed);
+  document.body.classList.toggle("tabbed", tabbed);
+  if (tabbed) {
+    el("tab-me").classList.toggle("active", id === "play");
+    el("tab-board").classList.toggle("active", id === "board");
   }
 };
 const message = (id, text, kind) => {
@@ -378,22 +434,56 @@ function render() {
   if (document.activeElement !== census && censusTimer === null) {
     census.value = me.census;
   }
+
+  // Vaiheportit tulevat palvelimelta, jottei sääntöä tarvitse toistaa täällä.
+  const gates = game.phase_gates || {};
+  const gateOpen = (command) =>
+    !gates[command] || gates[command].includes(game.current_phase);
+  const phaseList = (command) => (gates[command] || []).join(" and ");
+
+  const censusOpen = gateOpen("census");
+  el("census-box").classList.toggle("locked", !censusOpen);
+  census.disabled = !censusOpen;
+  el("census-label").textContent = censusOpen
+    ? "Census — population tokens on the board"
+    : "Census — counted in phase " + phaseList("census") +
+      " (now phase " + game.current_phase + ")";
+
+  const advancesOpen = gateOpen("advances");
+  el("adv-box").classList.toggle("locked", !advancesOpen);
+  el("adv-open").disabled = !advancesOpen;
+  el("adv-open").textContent = advancesOpen
+    ? "Buy Advances"
+    : "Bought in phase " + phaseList("advances");
   renderAdvanceSummary();
-  renderStandings();
+  renderBoard();
 }
 
-function renderStandings() {
-  const box = el("standings");
+function renderBoard() {
+  if (!game) return;
+  el("board-bar").textContent =
+    "Turn " + game.round_number + " · Phase " + game.current_phase;
+
+  const box = el("board-list");
   const ordered = [...game.players].sort(
     (a, b) => b.score.total - a.score.total || a.rank - b.rank
   );
-  box.innerHTML = "";
+  box.innerHTML =
+    '<div class="row head">' +
+      "<span></span><span>Civilization</span>" +
+      '<span class="num">City</span><span class="num">Cens</span>' +
+      '<span class="pts">VP</span>' +
+    "</div>";
   for (const player of ordered) {
     const row = document.createElement("div");
-    row.className = "row" + (player.civilization === me.civilization ? " self" : "");
+    row.className =
+      "row" + (me && player.civilization === me.civilization ? " self" : "");
     row.innerHTML =
       `<span class="rank">${player.rank}.</span>` +
-      `<span>${player.civilization}${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
+      `<span class="nm">${player.civilization}` +
+        `${player.nickname ? " (" + player.nickname + ")" : ""}</span>` +
+      `<span class="num">${player.cities}</span>` +
+      `<span class="num">${player.census}</span>` +
       `<span class="pts">${player.score.total}</span>`;
     box.appendChild(row);
   }
@@ -425,9 +515,12 @@ async function command(route, payload) {
     return;
   }
   if (status === 401) { await refresh(); return; }
+  const texts = {
+    403: "You cannot change that.",
+    422: "The phase changed — Census can only be counted in its own phase.",
+  };
   message("play-msg",
-    status === 403 ? "You cannot change that." : "Could not save. Check your connection.",
-    "error");
+    texts[status] || "Could not save. Check your connection.", "error");
 }
 
 function changeCities(delta) {
@@ -608,6 +701,9 @@ function renderAdvanceSummary() {
   el("adv-summary").textContent =
     count === 0 ? "none yet" : count + " cards · " + me.score.advances + " VP";
 }
+
+el("tab-me").onclick = () => show("play");
+el("tab-board").onclick = () => { renderBoard(); show("board"); };
 
 el("adv-open").onclick = openAdvances;
 el("adv-cancel").onclick = () => { show("play"); };

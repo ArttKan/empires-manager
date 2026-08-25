@@ -48,6 +48,7 @@ from mega_empires.credits import (
 from mega_empires.data import ADVANCES
 from mega_empires.models import GameState
 from mega_empires.scoring import calculate_score, visible_rankings
+from mega_empires.sequence import PHASE_GATED_COMMANDS
 from mega_empires.service import (
     CommandError,
     CommandResult,
@@ -178,6 +179,30 @@ def authorize(principal: Principal, civilization: str, command: str) -> None:
                 f"A player token for {principal.civilization or '?'} cannot "
                 f"change {command} for {civilization}."
             ),
+        )
+
+
+PHASE_LABELS = {
+    "census": "Census is counted in phase 2 and used in phase 3",
+    "advances": "Civilization Advances are bought in phase 12",
+}
+
+
+def check_phase(principal: Principal, command: str) -> None:
+    """Estä puhelimelta komennot väärässä vaiheessa.
+
+    Kannettava ohittaa portin: pelinjohtajan on voitava korjata virhe milloin
+    tahansa ilman että peliä siirretään vaiheissa taaksepäin.
+    """
+
+    allowed = PHASE_GATED_COMMANDS.get(command)
+    if allowed is None or principal.is_admin:
+        return
+    phase = get_service().snapshot().current_phase
+    if phase not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{PHASE_LABELS[command]}. The game is in phase {phase}.",
         )
 
 
@@ -319,6 +344,10 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
             "total": score.total,
         }
         entry["rank"] = rankings[player.civilization]
+    data["phase_gates"] = {
+        command: sorted(phases)
+        for command, phases in PHASE_GATED_COMMANDS.items()
+    }
     return data
 
 
@@ -394,6 +423,7 @@ async def set_census(
     principal: Principal = Depends(get_principal),
 ) -> dict:
     authorize(principal, civilization, "census")
+    check_phase(principal, "census")
     service = get_service()
     return await execute(
         lambda: service.set_census(
@@ -439,6 +469,7 @@ async def set_advances(
     principal: Principal = Depends(get_principal),
 ) -> dict:
     authorize(principal, civilization, "advances")
+    check_phase(principal, "advances")
     service = get_service()
     return await execute(
         lambda: service.set_advances(

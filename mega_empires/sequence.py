@@ -202,6 +202,26 @@ PHASES = (
 
 PHASE_BY_NUMBER = {phase.number: phase for phase in PHASES}
 
+# Census lasketaan laudalta vaiheessa 2 ja kulutetaan vaiheessa 3 Movementin
+# järjestykseen. Muissa vaiheissa luku ei ole ajan tasalla eikä sitä käytetä,
+# joten puhelimelta sen muuttaminen on todennäköisemmin virhe kuin kirjaus.
+# Kannettavaa tämä ei koske: pelinjohtajan on voitava korjata tieto milloin vain.
+CENSUS_PHASES = frozenset({2, 3})
+
+# Advance-kortit ostetaan vaiheessa 12. Muissa vaiheissa puhelimelta tehty
+# muutos on käytännössä aina vahinko — koko korttivalikoima kirjoitetaan
+# kerralla, joten väärä tallennus pyyhkii pelaajan kortit.
+ADVANCE_PHASES = frozenset({12})
+
+# Komennot, jotka puhelin saa lähettää vain tietyissä vaiheissa. Kaupunkimäärä
+# ei ole listalla tarkoituksella: se muuttuu myös konflikteissa ja
+# calamityissä, joten kapea ikkuna haittaisi enemmän kuin suojaisi.
+PHASE_GATED_COMMANDS = {
+    "census": CENSUS_PHASES,
+    "advances": ADVANCE_PHASES,
+}
+
+
 SPECIAL_ABILITY_ADVANCES = frozenset(
     {
         "diaspora",

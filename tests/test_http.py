@@ -398,15 +398,136 @@ class ScopeTests(HttpTestCase):
         self.player = {"Authorization": f"Bearer {self.hellas}"}
 
     def test_player_may_change_their_own_row(self) -> None:
-        for route, body in (
-            ("cities", {"value": 4}),
-            ("census", {"value": 20}),
-            ("advances", {"advances": ["pottery"]}),
+        # Census ja advances ovat vaihesidonnaisia; kaupungit eivät.
+        for phase, route, body in (
+            (1, "cities", {"value": 4}),
+            (2, "census", {"value": 20}),
+            (12, "advances", {"advances": ["pottery"]}),
         ):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
             response = self.client.post(
                 f"/players/Hellas/{route}", json=body, headers=self.player
             )
             self.assertEqual(response.status_code, 200, route)
+
+    def test_advances_are_editable_only_in_phase_twelve(self) -> None:
+        """Koko korttivalikoima kirjoitetaan kerralla, joten väärä vaihe pyyhkisi kortit."""
+
+        allowed = []
+        for phase in range(1, 14):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
+            if self.client.post(
+                "/players/Hellas/advances",
+                json={"advances": ["pottery"]},
+                headers=self.player,
+            ).status_code == 200:
+                allowed.append(phase)
+
+        self.assertEqual(allowed, [12])
+
+    def test_cities_stay_editable_in_every_phase(self) -> None:
+        """Kaupunkimäärä muuttuu myös konflikteissa ja calamityissä."""
+
+        for phase in range(1, 14):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/players/Hellas/cities",
+                    json={"value": 3},
+                    headers=self.player,
+                ).status_code,
+                200,
+                f"phase {phase}",
+            )
+
+    def test_admin_may_correct_advances_in_any_phase(self) -> None:
+        for phase in (1, 7, 13):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/players/Hellas/advances",
+                    json={"advances": ["pottery"]},
+                    headers=AUTH,
+                ).status_code,
+                200,
+                f"phase {phase}",
+            )
+
+    def test_census_is_editable_only_in_its_own_phases(self) -> None:
+        """Census lasketaan vaiheessa 2 ja kulutetaan vaiheessa 3."""
+
+        allowed, blocked = [], []
+        for phase in range(1, 14):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
+            status = self.client.post(
+                "/players/Hellas/census",
+                json={"value": 20 + phase},
+                headers=self.player,
+            ).status_code
+            (allowed if status == 200 else blocked).append(phase)
+
+        self.assertEqual(allowed, [2, 3])
+        self.assertEqual(len(blocked), 11)
+
+    def test_blocked_census_does_not_change_anything(self) -> None:
+        self.client.post(
+            "/turn", json={"round_number": 1, "current_phase": 7}, headers=AUTH
+        )
+
+        response = self.client.post(
+            "/players/Hellas/census", json={"value": 44}, headers=self.player
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("phase 7", response.json()["detail"])
+        state = self.client.get("/state", headers=AUTH).json()
+        hellas = [p for p in state["players"] if p["civilization"] == "Hellas"][0]
+        self.assertEqual(hellas["census"], 0)
+
+    def test_admin_may_correct_census_in_any_phase(self) -> None:
+        """Pelinjohtajan on voitava korjata tieto milloin tahansa."""
+
+        for phase in (1, 7, 13):
+            self.client.post(
+                "/turn",
+                json={"round_number": 1, "current_phase": phase},
+                headers=AUTH,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/players/Hellas/census", json={"value": 30}, headers=AUTH
+                ).status_code,
+                200,
+                f"phase {phase}",
+            )
+
+    def test_state_tells_clients_the_phase_gates(self) -> None:
+        body = self.client.get("/state", headers=AUTH).json()
+
+        self.assertEqual(
+            body["phase_gates"], {"census": [2, 3], "advances": [12]}
+        )
+        self.assertNotIn("cities", body["phase_gates"])
 
     def test_player_cannot_touch_another_row(self) -> None:
         response = self.client.post(
