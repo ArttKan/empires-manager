@@ -316,7 +316,7 @@ class NewGameWizard(tk.Toplevel):
         super().__init__(parent)
         self.title("New Mega Empires Game")
         self.configure(background=BACKGROUND)
-        self.geometry("720x500")
+        self.geometry("720x580")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -358,6 +358,16 @@ class NewGameWizard(tk.Toplevel):
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(0, 12))
 
+        # Nappi pakataan ennen muuta sisältöä: pack jakaa tilan pakkausjärjestyksessä,
+        # joten viimeisenä pakattu side="bottom" -nappi jäi leikkautumaan pois heti
+        # kun sisältö kasvoi (esim. kohdebanneri) ikkunaa korkeammaksi.
+        ttk.Button(
+            self.content,
+            text="Next",
+            style="Accent.TButton",
+            command=self._start_players,
+        ).pack(anchor="e", side="bottom", pady=20)
+
         if self.destination:
             _destination_banner(self.content, self.destination).pack(
                 fill="x", pady=(0, 18)
@@ -373,10 +383,8 @@ class NewGameWizard(tk.Toplevel):
                 font=("Segoe UI", 13),
                 width=32,
             ).pack(side="right", fill="x", expand=True, padx=(24, 0))
-        else:
-            # Polkua ei käytetä etätilassa, mutta se rakennetaan silti samaa
-            # koodipolkua pitkin. Kiinteä nimi pitää validoinnin tyytyväisenä.
-            self.save_name.set(MIRROR_SAVE_NAME)
+        # Etätilassa nimeä ei kysytä eikä käytetä: peli menee palvelimelle,
+        # ja `_install_remote_game` ohittaa polun kokonaan.
 
         mode_frame = ttk.LabelFrame(self.content, text="Game boxes", padding=14)
         mode_frame.pack(fill="x", pady=(0, 20))
@@ -410,13 +418,6 @@ class NewGameWizard(tk.Toplevel):
         )
         self.mode_note.pack(anchor="w", pady=(22, 0))
         self._update_mode_rules()
-
-        ttk.Button(
-            self.content,
-            text="Next",
-            style="Accent.TButton",
-            command=self._start_players,
-        ).pack(anchor="e", side="bottom", pady=20)
 
     def _update_mode_rules(self, _event: object | None = None) -> None:
         count = self.player_count.get()
@@ -452,19 +453,26 @@ class NewGameWizard(tk.Toplevel):
 
     def _start_players(self) -> None:
         self._update_mode_rules()
-        try:
-            save_path = save_path_for_name(self.save_name.get())
-        except ValueError as error:
-            messagebox.showerror("Invalid save name", str(error), parent=self)
-            return
-        if save_path.exists():
-            messagebox.showerror(
-                "Name already in use",
-                "A saved game with this name already exists. "
-                "Choose another name.",
-                parent=self,
-            )
-            return
+        # Nimi tarkistetaan vain kun se on kysytty. Etätilassa peli menee
+        # palvelimelle eikä paikallista polkua käytetä, joten nimen
+        # validointi vertaisi kiinteää täytenimeä paikallisiin tallennuksiin
+        # — ja törmäisi juuri palvelinpelin peilikopioon.
+        if self.ask_name:
+            try:
+                save_path = save_path_for_name(self.save_name.get())
+            except ValueError as error:
+                messagebox.showerror(
+                    "Invalid save name", str(error), parent=self
+                )
+                return
+            if save_path.exists():
+                messagebox.showerror(
+                    "Name already in use",
+                    "A saved game with this name already exists. "
+                    "Choose another name.",
+                    parent=self,
+                )
+                return
         try:
             self.scenario_names = scenario_civilizations(
                 self.game_mode.get(),
@@ -583,7 +591,12 @@ class NewGameWizard(tk.Toplevel):
             )
             self.grab_release()
             self.destroy()
-            self.on_complete(game, save_path_for_name(self.save_name.get()))
+            path = (
+                save_path_for_name(self.save_name.get())
+                if self.ask_name
+                else None
+            )
+            self.on_complete(game, path)
         else:
             self._show_player()
 
@@ -2498,8 +2511,7 @@ class MegaEmpiresApp:
                     "Create one now — it will be stored on the server.",
                     parent=self.root,
                 )
-                for child in self.root.winfo_children():
-                    child.destroy()
+                self._teardown_view()
                 NewGameWizard(
                     self.root,
                     self._install_remote_game,
@@ -2557,16 +2569,27 @@ class MegaEmpiresApp:
             # Peilin epäonnistuminen ei saa keskeyttää peliä.
             pass
 
-    def _new_game(self, destination: str = "") -> None:
+    def _teardown_view(self) -> None:
+        """Pura päänäkymä ja merkitse se puretuksi.
+
+        `_poll()` käy ajastimella myös velhon aikana. Jos se piirtäisi silloin,
+        se koskisi juuri tuhottuihin widgetteihin — Tk kaatuu siihen
+        "invalid command name" -virheeseen.
+        """
+
+        self._view_live = False
         for child in self.root.winfo_children():
             child.destroy()
+
+    def _new_game(self, destination: str = "") -> None:
+        self._teardown_view()
         NewGameWizard(
             self.root,
             self._open_game,
             destination=destination or self._local_destination(),
         )
 
-    def _install_remote_game(self, game: GameState, _path: Path) -> None:
+    def _install_remote_game(self, game: GameState, _path: Path | None) -> None:
         """Lähetä velhon luoma peli palvelimelle ja jatka siitä."""
 
         service = self.service
@@ -2600,6 +2623,11 @@ class MegaEmpiresApp:
         if not isinstance(self.service, RemoteGameService):
             return
         delay = POLL_INTERVAL_MS
+        if not getattr(self, "_view_live", False):
+            # Velho tai tallennusvalinta on auki: ei ole mitään piirrettävää.
+            # Ajastin jää käyntiin, jotta kysely jatkuu kun näkymä palaa.
+            self._poll_job = self.root.after(delay, self._poll)
+            return
         try:
             snapshot = self.service.snapshot()
         except CommandError as error:
@@ -2782,8 +2810,7 @@ class MegaEmpiresApp:
         self._refresh_all()
 
     def _build_main_view(self) -> None:
-        for child in self.root.winfo_children():
-            child.destroy()
+        self._teardown_view()
         # Rivien widget-viittaukset osoittavat juuri tuhottuihin olioihin.
         self._row_order = None
         self._row_widgets = {}
@@ -2864,6 +2891,7 @@ class MegaEmpiresApp:
             self.lobby_tab = ttk.Frame(self.notebook)
             self.notebook.add(self.lobby_tab, text="Players")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self._view_live = True
         self._refresh_all()
 
     def _confirm_new_game(self) -> None:
@@ -2875,8 +2903,7 @@ class MegaEmpiresApp:
                 icon="warning",
                 parent=self.root,
             ):
-                for child in self.root.winfo_children():
-                    child.destroy()
+                self._teardown_view()
                 NewGameWizard(
                     self.root,
                     self._install_remote_game,
@@ -4182,11 +4209,14 @@ class MegaEmpiresApp:
         # getattr, koska _poll() käy ajastimella ja voi osua hetkeen jolloin
         # päänäkymää ei ole vielä rakennettu.
         tab = getattr(self, "lobby_tab", None)
-        return (
-            tab is not None
-            and hasattr(self, "notebook")
-            and self.notebook.select() == str(tab)
-        )
+        notebook = getattr(self, "notebook", None)
+        if tab is None or notebook is None:
+            return False
+        try:
+            return bool(notebook.winfo_exists()) and notebook.select() == str(tab)
+        except tk.TclError:
+            # Widget on ehditty tuhota kyselyn ja piirron välissä.
+            return False
 
     def _refresh_lobby(self) -> None:
         """Näytä liittymisohje ja paikkojen tila.

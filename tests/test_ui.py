@@ -577,6 +577,8 @@ class RemoteModeTests(unittest.TestCase):
         self.app.save_path = None
         self.app.game = self._game(state_version=1)
         self.app.service = None
+        # Kysely piirtää vain kun päänäkymä on pystyssä.
+        self.app._view_live = True
 
     def tearDown(self) -> None:
         self.root.destroy()
@@ -799,6 +801,47 @@ class RemoteModeTests(unittest.TestCase):
         self.assertIn("server down", banner)
         self.assertIn("LOCAL GAME", banner)
 
+    def test_poll_does_not_draw_while_the_view_is_torn_down(self) -> None:
+        """Velhon aikana widgetit on tuhottu; piirto kaataisi Tkinterin."""
+
+        self.app.service = _StubRemote([self._game(state_version=9)])
+        self.app._view_live = False
+        self.app._refresh_all = lambda: self.fail("must not draw")
+        before = self.app.game
+
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.assertIs(self.app.game, before)
+
+    def test_polling_resumes_once_the_view_is_back(self) -> None:
+        service = _StubRemote([self._game(state_version=9)])
+        self.app.service = service
+        self.app._view_live = False
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.app._view_live = True
+        self.app._refresh_all = lambda: None
+        self.app._poll()
+        self.root.after_cancel(self.app._poll_job)
+
+        self.assertEqual(self.app.game.state_version, 9)
+
+    def test_lobby_visible_survives_a_destroyed_notebook(self) -> None:
+        """`_poll` osuu ajastimena myös hetkeen jolloin näkymä on juuri purettu."""
+
+        frame = tk.Frame(self.root)
+        notebook = ttk_notebook = __import__(
+            "tkinter.ttk", fromlist=["Notebook"]
+        ).Notebook(self.root)
+        notebook.add(frame, text="Players")
+        self.app.notebook = notebook
+        self.app.lobby_tab = frame
+        notebook.destroy()
+
+        self.assertFalse(self.app._lobby_visible())
+
     def test_census_typing_is_debounced_into_one_command(self) -> None:
         self.app.service = _StubRemote([self._game()])
         commits = []
@@ -892,7 +935,8 @@ class DestinationBannerTests(unittest.TestCase):
             self.assertIn("REMOTE GAME", banners[0])
             self.assertIn("https://example.test", banners[0])
             self.assertFalse(wizard.ask_name)
-            self.assertTrue(wizard.save_name.get())
+            # Nimeä ei kysytä eikä keksitä: peli menee palvelimelle.
+            self.assertEqual(wizard.save_name.get(), "")
         finally:
             wizard.destroy()
 
@@ -951,6 +995,69 @@ class DestinationBannerTests(unittest.TestCase):
             self.assertEqual(dialog.tree.selection(), ("0",))
         finally:
             dialog.destroy()
+
+    def test_remote_wizard_ignores_local_save_names(self) -> None:
+        """Peilikopio `palvelinpeli.json` ei saa estää uuden pelin luomista.
+
+        Etätilassa nimeä ei kysytä, joten paikallisten tallennusten
+        nimitörmäystarkistus ei koske sitä lainkaan.
+        """
+
+        from mega_empires.storage import save_game, save_path_for_name
+
+        save_game(
+            GameState(
+                player_count=1,
+                players=[PlayerState("Hellas", "M", "WEST")],
+                game_mode="WEST",
+            ),
+            save_path_for_name("palvelinpeli"),
+        )
+        self.app.service = RemoteGameService("https://example.test", "tok")
+        wizard = ui_module.NewGameWizard(
+            self.root,
+            lambda *a: None,
+            destination=self.app._remote_destination(),
+            ask_name=False,
+        )
+        errors = []
+        try:
+            with mock.patch.object(
+                ui_module.messagebox, "showerror",
+                side_effect=lambda *a, **k: errors.append(a),
+            ):
+                wizard.player_count.set(3)
+                wizard.game_mode.set("WEST")
+                wizard._start_players()
+            self.assertEqual(errors, [])
+            self.assertTrue(wizard.scenario_names)
+        finally:
+            wizard.destroy()
+
+    def test_local_wizard_still_rejects_a_duplicate_name(self) -> None:
+        from mega_empires.storage import save_game, save_path_for_name
+
+        save_game(
+            GameState(
+                player_count=1,
+                players=[PlayerState("Hellas", "M", "WEST")],
+                game_mode="WEST",
+            ),
+            save_path_for_name("perjantai"),
+        )
+        wizard = ui_module.NewGameWizard(self.root, lambda *a: None)
+        errors = []
+        try:
+            with mock.patch.object(
+                ui_module.messagebox, "showerror",
+                side_effect=lambda *a, **k: errors.append(a),
+            ):
+                wizard.save_name.set("perjantai")
+                wizard._start_players()
+            self.assertEqual(len(errors), 1)
+            self.assertIn("Name already in use", errors[0][0])
+        finally:
+            wizard.destroy()
 
     def test_saved_game_dialog_names_the_save_directory(self) -> None:
         dialog = ui_module.SavedGameDialog(
