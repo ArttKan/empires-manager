@@ -18,9 +18,20 @@
     height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
   }
   #scroll {
-    flex: 1; min-height: 0; overflow-y: auto;
+    flex: 1; min-height: 0; overflow-y: auto; position: relative;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
+  /* Vedä ylhäältä päivittääksesi. Selaimen oma ele ei toimi, koska vierivä
+     elementti ei ole dokumentti vaan tämä säiliö. */
+  #pull {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 4;
+    display: flex; align-items: center; justify-content: center;
+    height: 0; overflow: hidden;
+    color: var(--muted); font-size: .85rem;
+    transition: height .18s ease;
+  }
+  #pull.armed { color: var(--accent); }
+  #pull.busy { height: 38px; }
   .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 24px; }
   h1 { font-size: 1.4rem; margin: 8px 0 4px; }
   p.sub { color: var(--muted); margin: 0 0 24px; font-size: .95rem; }
@@ -111,6 +122,7 @@
     border: 1px solid #344258; border-left-width: 6px; border-radius: 10px;
   }
   .adv.owned { border-color: var(--accent); background: var(--panel-alt); }
+  .adv:disabled { opacity: 1; }   /* katselutila: kortit näkyvät normaalisti */
   .adv .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
   .adv .body { flex: 1; min-width: 0; }
   .adv .nm { font-size: 1rem; }
@@ -168,6 +180,7 @@
 </head>
 <body>
 <div id="scroll">
+<div id="pull"></div>
 <div class="wrap">
 
   <!-- ── liittyminen ───────────────────────────────────────────── -->
@@ -243,6 +256,10 @@
     </div>
     <div class="credits" id="adv-credits"></div>
     <div id="adv-list"></div>
+    <div id="adv-note" class="msg info hidden">
+      Advances are bought in phase 12. You can look at the list and the prices
+      now, but not change it.
+    </div>
     <div class="sticky-save">
       <button id="adv-save">Save</button>
     </div>
@@ -474,12 +491,11 @@ function render() {
     : "Census — counted in phase " + phaseList("census") +
       " (now phase " + game.current_phase + ")";
 
-  const advancesOpen = gateOpen("advances");
-  el("adv-box").classList.toggle("locked", !advancesOpen);
-  el("adv-open").disabled = !advancesOpen;
-  el("adv-open").textContent = advancesOpen
+  // Lista avautuu aina: omien korttien katsominen ei ole muokkaamista, ja
+  // pelaajan pitää nähdä mitä hänellä on missä tahansa vaiheessa.
+  el("adv-open").textContent = gateOpen("advances")
     ? "Buy Advances"
-    : "Bought in phase " + phaseList("advances");
+    : "View Advances";
   renderAdvanceSummary();
   renderBoard();
 }
@@ -664,12 +680,22 @@ function renderCredits() {
   }
 }
 
+function advancesEditable() {
+  const phases = (game && game.phase_gates && game.phase_gates.advances) || [];
+  return !game || phases.length === 0 || phases.includes(game.current_phase);
+}
+
 function renderAdvances() {
   renderCredits();
+  const editable = advancesEditable();
   const owned = catalogue.advances.filter((a) => selection.has(a.id));
   const points = owned.reduce((sum, a) => sum + a.vp, 0);
   el("adv-sub").textContent =
-    owned.length + " selected · " + points + " VP";
+    owned.length + " selected · " + points + " VP" +
+    (editable ? "" : " · view only");
+  el("adv-save").classList.toggle("hidden", !editable);
+  el("adv-note").classList.toggle("hidden", editable);
+  el("adv-cancel").textContent = editable ? "Cancel" : "Back";
 
   const list = el("adv-list");
   list.innerHTML = "";
@@ -695,11 +721,14 @@ function renderAdvances() {
         `<div class="meta">${advance.groups.map((g) => GROUP_LABELS[g]).join(" · ")}` +
         ` · ${advance.vp} VP</div>` +
       `</span>` + price;
-    button.onclick = () => {
-      if (selection.has(advance.id)) selection.delete(advance.id);
-      else selection.add(advance.id);
-      renderAdvances();
-    };
+    button.disabled = !editable;
+    if (editable) {
+      button.onclick = () => {
+        if (selection.has(advance.id)) selection.delete(advance.id);
+        else selection.add(advance.id);
+        renderAdvances();
+      };
+    }
     list.appendChild(button);
   }
 }
@@ -741,6 +770,64 @@ function renderAdvanceSummary() {
   el("adv-summary").textContent =
     count === 0 ? "none yet" : count + " cards · " + me.score.advances + " VP";
 }
+
+// ── vedä päivittääksesi ───────────────────────────────────────
+const PULL_THRESHOLD = 70;   // px ennen kuin ele laukeaa
+let pullStart = null;
+let pulled = 0;
+let pullBusy = false;
+
+function pullIndicator(height, armed, text) {
+  const node = el("pull");
+  node.style.height = height + "px";
+  node.textContent = text;
+  node.classList.toggle("armed", armed);
+}
+
+function pullReset() {
+  pullStart = null;
+  pulled = 0;
+  el("pull").classList.remove("busy");
+  pullIndicator(0, false, "");
+}
+
+const scroller = el("scroll");
+
+scroller.addEventListener("touchstart", (event) => {
+  if (pullBusy || scroller.scrollTop > 0) { pullStart = null; return; }
+  pullStart = event.touches[0].clientY;
+  pulled = 0;
+}, { passive: true });
+
+scroller.addEventListener("touchmove", (event) => {
+  if (pullStart === null) return;
+  const delta = event.touches[0].clientY - pullStart;
+  // Sormi liikkui ylös tai lista ehti vieriä: ele ei ole enää vetoa.
+  if (delta <= 0 || scroller.scrollTop > 0) { pullReset(); return; }
+  // Jarrutus, jotta veto tuntuu kumiselta eikä seuraa sormea yksi yhteen.
+  pulled = Math.min(delta * 0.5, PULL_THRESHOLD + 20);
+  pullIndicator(
+    pulled,
+    pulled >= PULL_THRESHOLD,
+    pulled >= PULL_THRESHOLD ? "Release to refresh" : "Pull to refresh"
+  );
+}, { passive: true });
+
+scroller.addEventListener("touchend", async () => {
+  if (pullStart === null) return;
+  const trigger = pulled >= PULL_THRESHOLD;
+  pullStart = null;
+  if (!trigger) { pullReset(); return; }
+  pullBusy = true;
+  el("pull").classList.add("busy");
+  pullIndicator(38, false, "Refreshing…");
+  try {
+    await refresh();
+  } finally {
+    pullBusy = false;
+    pullReset();
+  }
+});
 
 el("tab-me").onclick = () => show("play");
 el("tab-board").onclick = () => { renderBoard(); show("board"); };
