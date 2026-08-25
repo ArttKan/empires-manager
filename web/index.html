@@ -134,9 +134,10 @@
   }
   .tabs button {
     flex: 1; margin: 0; border-radius: 0;
-    /* Kotipainikkeen turva-alue kuuluu napin sisään, ei sen alle: erillisenä
-       täytteenä se näkyi tyhjänä palkkina painikkeiden alapuolella. */
-    padding: 16px 8px calc(16px + env(safe-area-inset-bottom));
+    /* max() eikä calc(): turva-alue korvaa normaalin täytteen, ei kasva sen
+       päälle. Yhteenlaskettuna eleohjauksen tai kotipainikkeen alue jätti
+       painikkeiden alle turhan levyisen tyhjän kaistan. */
+    padding: 14px 8px max(14px, env(safe-area-inset-bottom));
     background: transparent; color: var(--muted);
     font-size: .95rem; font-weight: 600;
   }
