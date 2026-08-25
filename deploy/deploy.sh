@@ -6,9 +6,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/home/megaempires/mega-empires-backend}"
 VENV_DIR="${VENV_DIR:-/home/megaempires/venv}"
 SERVICE="${SERVICE:-mega-empires-backend.service}"
-# Backend-työ tehdään toistaiseksi omassa haarassaan; master jätetään rauhaan
-# kunnes koko ketju on todettu toimivaksi.
-BRANCH="${BRANCH:-backend-sekoilu}"
+BRANCH="${BRANCH:-master}"
 SYSTEMCTL="/usr/bin/systemctl"
 
 INSTALLED_UNIT="/etc/systemd/system/$SERVICE"

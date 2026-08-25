@@ -42,11 +42,8 @@ sudo -u megaempires ssh -T git@github.com
 
 ### 2. Kloonaus ja venv
 
-Kloonaus ottaa suoraan oikean haaran. Ilman `--branch`-valitsinta työhakemistoon
-jäisi `master`, jossa backend-työtä ei ole.
-
 ```bash
-sudo -u megaempires git clone --branch backend-sekoilu \
+sudo -u megaempires git clone \
     git@github.com:ArttKan/mega-empires-manager.git \
     /home/megaempires/mega-empires-backend
 sudo -u megaempires python3 -m venv /home/megaempires/venv
@@ -94,7 +91,7 @@ kopioida tallennuksia käsin.
 Kehityskoneelta ensin GitHubiin:
 
 ```bash
-git push origin backend-sekoilu
+git push origin master
 ```
 
 Sitten palvelimella:
@@ -109,11 +106,10 @@ muuttunut, ajaa testit ja käynnistää palvelun uudelleen vain jos testit meniv
 läpi. `tests/test_ui.py` ohittaa itsensä automaattisesti, koska palvelimella ei
 ole `python3-tk`-pakettia.
 
-Oletukset voi ohittaa ympäristömuuttujilla. Tätä tarvitaan vasta kun backend-työ
-lopulta yhdistetään masteriin:
+Oletukset voi ohittaa ympäristömuuttujilla, esimerkiksi kokeiluhaaraa varten:
 
 ```bash
-BRANCH=master sudo -u megaempires .../deploy.sh
+BRANCH=jokin-haara sudo -u megaempires .../deploy.sh
 ```
 
 ## systemd-unit ja salaisuudet
