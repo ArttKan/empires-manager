@@ -11,18 +11,18 @@
     --text: #f5f7fa; --muted: #aeb9c7; --accent: #d6a642; --error: #b94141;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+    padding-top: env(safe-area-inset-top);
   }
-  /* 100dvh eikä 100vh: dvh seuraa osoiterivin liukumista, jolloin palkki ei
-     jää sen alle eikä hyppää sisään ja ulos. */
-  .wrap {
-    max-width: 560px; margin: 0 auto; padding: 20px 16px 0;
-    min-height: 100dvh; display: flex; flex-direction: column;
+  #scroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
-  .wrap > section { padding-bottom: 24px; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 24px; }
   h1 { font-size: 1.4rem; margin: 8px 0 4px; }
   p.sub { color: var(--muted); margin: 0 0 24px; font-size: .95rem; }
   label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
@@ -74,6 +74,7 @@
     background: var(--panel-alt); color: var(--text); border-radius: 14px;
   }
   .stepper button:active { background: #31445f; }
+  .stepper button:disabled { opacity: .3; background: var(--panel); }
   .stepper .value { flex: 1; text-align: center; font-size: 2.2rem; font-weight: 700; }
   .control.locked { opacity: .55; }
   .control.locked input, .control.locked button { pointer-events: none; }
@@ -124,9 +125,11 @@
   }
   .adv-head button { width: auto; margin: 0; padding: 12px 18px; }
   /* ── välilehdet ───────────────────────────────────────────── */
+  /* Palkki on kuoren jäsen eikä vierivää sisältöä: se ei liiku, joten
+     ylivieritys ei paljasta sen alta mitään eikä sitä tarvitse piirtää
+     uudelleen kesken rullauksen. */
   .tabs {
-    position: sticky; bottom: 0; z-index: 10;
-    display: flex; margin: auto -16px 0;
+    flex: none; display: flex;
     background: var(--panel); border-top: 1px solid #344258;
   }
   .tabs button {
@@ -164,6 +167,7 @@
 </style>
 </head>
 <body>
+<div id="scroll">
 <div class="wrap">
 
   <!-- ── liittyminen ───────────────────────────────────────────── -->
@@ -245,14 +249,22 @@
     <div id="adv-msg" class="msg hidden"></div>
   </section>
 
+</div>
+</div>
+
   <nav class="tabs hidden" id="tabs">
     <button id="tab-me" class="active">—</button>
     <button id="tab-board">Scoreboard</button>
   </nav>
 
-</div>
 <script>
 const STORE_KEY = "megaempires.session";
+// Yksi teksti kaikille kirjausvirheille: pelaajan kannalta syy on sama —
+// arvo ei mennyt perille, katso näytöllä olevat luvut ja yritä tarvittaessa
+// uudelleen. Konfliktin mekaniikka ei auta häntä pöydässä.
+const ENTRY_FAILED =
+  "Entering the information failed. Check the shown values and try again " +
+  "if necessary.";
 
 const el = (id) => document.getElementById(id);
 const TABBED = ["play", "board"];   // näkymät joissa välilehtipalkki näkyy
@@ -374,11 +386,18 @@ async function claim(civilization) {
 
 // ── pelinäkymä ────────────────────────────────────────────────
 const CENSUS_DEBOUNCE_MS = 400;
+// Nopea peräkkäinen napautus ehti ennen lähettää toisen komennon ennen kuin
+// ensimmäisen vastaus saapui, jolloin versio oli vanhentunut ja käyttäjä sai
+// turhan konfliktivaroituksen. Nyt näppäily kerätään yhdeksi komennoksi.
+const CITIES_DEBOUNCE_MS = 500;
+const MAX_CITIES = 9;
 const POLL_FALLBACK_MS = 15000;
 
 let me = null;          // oma rivi viimeisimmästä tilannekuvasta
 let game = null;        // koko tilannekuva
 let censusTimer = null;
+let citiesTimer = null;
+let citiesPending = null;   // näytetty arvo ennen kuin komento on lähtenyt
 let events = null;
 
 function authHeaders() {
@@ -433,7 +452,7 @@ function render() {
     me.score.ast + " from A.S.T. + " +
     me.score.advances + " points from " + me.advances.length + " advances" +
     (me.score.bonus ? " + " + me.score.bonus + " bonus" : "");
-  el("cities-value").textContent = me.cities;
+  renderCities();
 
   // Älä kirjoita kentän päälle kesken kirjoittamisen.
   const census = el("census");
@@ -514,27 +533,43 @@ async function command(route, payload) {
     return;
   }
   if (status === 409) {
-    message("play-msg",
-      "Someone else changed your row first — the numbers below are current. "
-      + "Repeat your change if it is still needed.", "error");
+    message("play-msg", ENTRY_FAILED, "error");
     await refresh();
     return;
   }
   if (status === 401) { await refresh(); return; }
   const texts = {
     403: "You cannot change that.",
-    422: "The phase changed — Census can only be counted in its own phase.",
+    422: "The phase changed — that can only be entered in its own phase.",
   };
-  message("play-msg",
-    texts[status] || "Could not save. Check your connection.", "error");
+  message("play-msg", texts[status] || ENTRY_FAILED, "error");
+}
+
+function citiesShown() {
+  return citiesPending !== null ? citiesPending : (me ? me.cities : 0);
+}
+
+function renderCities() {
+  const value = citiesShown();
+  el("cities-value").textContent = value;
+  el("cities-down").disabled = value <= 0;
+  el("cities-up").disabled = value >= MAX_CITIES;
 }
 
 function changeCities(delta) {
   if (!me) return;
-  const target = Math.max(0, Math.min(9, me.cities + delta));
-  if (target === me.cities) return;
-  el("cities-value").textContent = target;   // välitön palaute napautukseen
-  command("cities", { value: target });
+  const target = Math.max(0, Math.min(MAX_CITIES, citiesShown() + delta));
+  if (target === citiesShown()) return;
+  citiesPending = target;
+  renderCities();                       // välitön palaute napautukseen
+  if (citiesTimer !== null) clearTimeout(citiesTimer);
+  citiesTimer = setTimeout(() => {
+    citiesTimer = null;
+    const value = citiesPending;
+    citiesPending = null;
+    if (!me || value === me.cities) { renderCities(); return; }
+    command("cities", { value });
+  }, CITIES_DEBOUNCE_MS);
 }
 
 function scheduleCensus() {
@@ -692,14 +727,12 @@ async function saveAdvances() {
     return;
   }
   if (status === 409) {
-    message("adv-msg",
-      "Someone else changed your row first. Reopening with current values.",
-      "error");
+    message("adv-msg", ENTRY_FAILED, "error");
     await refresh();
     await openAdvances();
     return;
   }
-  message("adv-msg", "Could not save. Check your connection.", "error");
+  message("adv-msg", ENTRY_FAILED, "error");
 }
 
 function renderAdvanceSummary() {
