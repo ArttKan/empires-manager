@@ -64,7 +64,6 @@
   .msg.error { background: #3a1f1f; color: #ffc9c9; }
   .msg.info { background: var(--panel); color: var(--muted); }
   .hidden { display: none; }
-  .build { color: var(--muted); font-size: .7rem; text-align: center; padding: 10px 0 2px; }
 
   /* ── oma rivi ─────────────────────────────────────────────── */
   .me { background: var(--panel); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
@@ -124,6 +123,7 @@
   }
   .card.owned { border-color: var(--accent); background: var(--panel-alt); }
   .card:disabled { opacity: 1; }   /* katselutila: kortit näkyvät normaalisti */
+  .card.locked .tick { color: var(--muted); }
   .card .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
   .card .body { flex: 1; min-width: 0; }
   .card .nm { font-size: 1rem; }
@@ -238,7 +238,6 @@
     </div>
 
     <div id="play-msg" class="msg hidden"></div>
-    <div class="build">build {{BUILD}}</div>
   </section>
 
   <!-- ── pistetaulu ───────────────────────────────────────────── -->
@@ -690,11 +689,22 @@ function advancesEditable() {
 function renderAdvances() {
   renderCredits();
   const editable = advancesEditable();
-  const owned = catalogue.advances.filter((a) => selection.has(a.id));
-  const points = owned.reduce((sum, a) => sum + a.vp, 0);
+  // Omistetut, ei ostoskoria: valinta muuttuu vasta tallennuksessa, joten
+  // kesken olevan oston laskeminen mukaan väittäisi pisteitä joita ei vielä ole.
+  const held = catalogue.advances.filter((a) => a.owned);
+  const points = held.reduce((sum, a) => sum + a.vp, 0);
   el("cards-sub").textContent =
-    owned.length + " selected · " + points + " VP" +
+    held.length + " owned · " + points + " VP" +
     (editable ? "" : " · view only");
+
+  // Hinta lasketaan vain korteista joita ei vielä omista: jo ostetuista ei
+  // makseta uudelleen.
+  const buying = catalogue.advances.filter(
+    (a) => selection.has(a.id) && !a.owned
+  );
+  const total = buying.reduce((sum, a) => sum + a.effective_cost, 0);
+  el("cards-save").textContent =
+    buying.length === 0 ? "Save" : `Buy ${buying.length} for ${total}`;
   el("cards-save").classList.toggle("hidden", !editable);
   el("cards-note").classList.toggle("hidden", editable);
   el("cards-cancel").textContent = editable ? "Cancel" : "Back";
@@ -704,27 +714,30 @@ function renderAdvances() {
   for (const advance of ordered) {
     const chosen = selection.has(advance.id);
     const button = document.createElement("button");
-    button.className = "card" + (chosen ? " owned" : "");
+    button.className =
+      "card" + (chosen ? " owned" : "") + (advance.locked ? " locked" : "");
     button.style.borderLeftColor = GROUP_COLORS[advance.groups[0]];
 
-    // Hinta näytetään vain kortille jota ei vielä omista: omistetulla se on
-    // maksettu eikä muutu miksikään.
+    // Hinta piilotetaan vain jo omistetulta kortilta: se on maksettu. Ostoon
+    // valittu kortti näyttää yhä hintansa — se on juuri se mitä pelaaja on
+    // maksamassa, eikä sitä saa korvata pistearvolla.
     const discounted = advance.effective_cost < advance.cost;
-    const price = chosen
+    const price = advance.owned
       ? `<div class="price"><div class="now">${advance.vp} VP</div></div>`
       : `<div class="price">` +
         (discounted ? `<div class="was">${advance.cost}</div>` : "") +
         `<div class="now">${advance.effective_cost}</div></div>`;
 
     button.innerHTML =
-      `<span class="tick">${chosen ? "✓" : ""}</span>` +
+      `<span class="tick">${advance.locked ? "🔒" : chosen ? "✓" : ""}</span>` +
       `<span class="body">` +
         `<div class="nm">${advance.name}</div>` +
         `<div class="meta">${advance.groups.map((g) => GROUP_LABELS[g]).join(" · ")}` +
         ` · ${advance.vp} VP</div>` +
       `</span>` + price;
-    button.disabled = !editable;
-    if (editable) {
+    // Aiempien kierrosten kortit on jo ostettu: niitä ei voi perua.
+    button.disabled = !editable || advance.locked;
+    if (editable && !advance.locked) {
       button.onclick = () => {
         if (selection.has(advance.id)) selection.delete(advance.id);
         else selection.add(advance.id);
@@ -770,7 +783,7 @@ function renderAdvanceSummary() {
   if (!me) return;
   const count = me.advances.length;
   el("cards-summary").textContent =
-    count === 0 ? "none yet" : count + " cards · " + me.score.advances + " VP";
+    count + (count === 1 ? " card · " : " cards · ") + me.score.advances + " VP";
 }
 
 // ── vedä päivittääksesi ───────────────────────────────────────

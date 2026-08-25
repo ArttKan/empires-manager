@@ -20,6 +20,9 @@ class PlayerState:
     ast_bonus: bool = False
     census: int = 0
     flexible_credits: dict[str, int] = field(default_factory=dict)
+    # Kortti-id -> kierros jolla se hankittiin. Tarvitaan koska saman kierroksen
+    # ostot eivät anna alennusta toisilleen: hankintavaihe on yhtäaikainen.
+    advance_turns: dict[str, int] = field(default_factory=dict)
     # Kasvaa jokaisella hyväksytyllä komennolla. Asiakas lähettää tuntemansa
     # arvon mukana, jotta vanhentunut kirjoitus voidaan hylätä sen sijaan että
     # se yliajaisi toisen pelaajan juuri tekemän muutoksen.
@@ -41,6 +44,12 @@ class PlayerState:
         self.ast_step = max(0, min(AST_MAX_STEP, int(self.ast_step)))
         self.census = max(0, min(55, int(self.census)))
         self.advances = list(dict.fromkeys(self.advances))
+        # Leimat vain omistetuille korteille; myydyn kortin leima on roskaa.
+        self.advance_turns = {
+            advance_id: max(0, int(turn))
+            for advance_id, turn in self.advance_turns.items()
+            if advance_id in set(self.advances)
+        }
         self.ast_bonus = bool(self.ast_bonus)
         self.version = max(0, int(self.version))
         self.flexible_credits = {
@@ -64,6 +73,10 @@ class PlayerState:
                 str(group): int(value)
                 for group, value in data.get("flexible_credits", {}).items()
             },
+            advance_turns={
+                str(advance_id): int(turn)
+                for advance_id, turn in data.get("advance_turns", {}).items()
+            },
         )
         player.normalize()
         return player
@@ -80,7 +93,7 @@ class GameState:
     # HUOM: `version` on tallennusmuodon versio, ei pelitilan versio.
     # `state_version` on maailmanlaajuinen laskuri, jolla asiakas tunnistaa
     # onko sen tuntema tilannekuva vanhentunut.
-    version: int = 5
+    version: int = 6
     state_version: int = 0
     saved_at: str = ""
 
@@ -122,7 +135,7 @@ class GameState:
             ast_variant=str(data.get("ast_variant", "BASIC")),
             round_number=int(data.get("round_number", 1)),
             current_phase=int(data.get("current_phase", 1)),
-            version=5,
+            version=6,
             state_version=int(data.get("state_version", 0)),
             saved_at=str(data.get("saved_at", "")),
         )

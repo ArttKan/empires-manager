@@ -98,6 +98,19 @@ the backend conversion tractable.
 - **Era boundaries are per civilization and per scenario.** Read them through
   `basic_ast_era_starts(civilization, player_count, game_mode)`, never straight
   from `BASIC_AST_ERA_STARTS` — the 3-player East game shifts Parthia's MBA start.
+- **Same-turn purchases do not discount each other.** The acquisition phase is
+  simultaneous, so a card bought this turn gives neither its colour credits nor its
+  row-chain discount to another card bought in the same turn — even when the player
+  records the purchases in several batches. `PlayerState.advance_turns` stamps each
+  card with the turn it was acquired; price everything through
+  `credits.discount_advances(player, round_number)` and pass the result as `owned=`
+  to `advance_price()` and `color_credits()`. An unstamped card counts as old, so
+  saves predating this keep their discounts.
+- **Advances from earlier turns are permanent.** A phone may only deselect a card
+  it bought on the current turn, so a mistyped purchase can be undone during the
+  phase but a real one cannot be un-bought. Enforced server-side for player tokens
+  (422) and shown as a locked row in the PWA. **Admin bypasses it** — the game
+  master must be able to correct a misrecorded card.
 - **`ADVANCE_CHAINS` is derived positionally** — `data.py` slices `ADVANCES` into
   consecutive triples, so each row of `_ADVANCE_ROWS` is one 1 VP → 3 VP → 6 VP
   discount chain. **Reordering or inserting a row silently breaks the discount
@@ -131,7 +144,7 @@ the backend conversion tractable.
   current value up with `_player(civilization)` rather than trusting the closure.
 - Call `normalize()` after editing state from outside the models; it clamps
   cities, A.S.T. step 0–15, census, and dedupes advances.
-- The save format is `version: 5`; `GameState.from_dict` migrates older saves.
+- The save format is `version: 6`; `GameState.from_dict` migrates older saves.
   Bump the version and add a migration branch if the schema changes.
 - **`GameState.version` is the save format; `state_version` is the global command
   counter.** Do not confuse them. `PlayerState.version` is the per-player counter
@@ -331,6 +344,18 @@ no exit. The flag lives in the unit's `ExecStart` and must stay there, with
 **Known gap:** `get_service()` caches the loaded save, so a game replaced *on disk*
 still needs a restart — `POST /game` is the supported way to change games and does
 not.
+
+- **Never name a DOM id or class `adv*` in `web/`.** Ad blockers hide elements
+  matching that prefix with generic rules, so `adv-box`, `adv-open` and `.adv`
+  were silently `display: none` on every device with blocking — present in the
+  served HTML and in the parsed DOM, invisible and unfindable in the browser.
+  `advances` is equally unsafe; the card UI uses `cards-*` and `.card`. The same
+  applies to `ad-`, `ads`, `banner`, `sponsor`, `promo`.
+- **The page sends `Cache-Control: no-store` and embeds a build id** (a hash of
+  the served file, also in the `X-Build` header, shown at the foot of the player's
+  row). The whole app is one unversioned file, so without both it is impossible to
+  tell whether a phone is running current code — which is the first thing worth
+  establishing when the page misbehaves.
 
 Remaining: the manifest and service worker for home-screen install, and the lobby
 view in the desktop app (join code and claim status on the TV, release a seat).

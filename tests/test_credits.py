@@ -1,6 +1,7 @@
 import unittest
 
 from mega_empires.credits import (
+    discount_advances,
     advance_price,
     color_credits,
     flexible_credit_entitlement,
@@ -80,6 +81,66 @@ class CreditTests(unittest.TestCase):
             flexible_credit_entitlement(["written_record", "monument"]),
             30,
         )
+
+
+class SameTurnDiscountTests(unittest.TestCase):
+    """Hankintavaihe on yhtäaikainen: saman kierroksen ostot eivät alenna toisiaan."""
+
+    def test_untagged_advances_count_as_old(self) -> None:
+        """Ennen tätä sääntöä tallennetut pelit eivät saa menettää alennuksiaan."""
+
+        player = PlayerState("Hellas", "M", "WEST", advances=["mysticism"])
+
+        self.assertEqual(discount_advances(player, 5), ["mysticism"])
+
+    def test_this_turns_purchase_gives_no_discount(self) -> None:
+        player = PlayerState(
+            "Hellas", "M", "WEST",
+            advances=["mysticism"],
+            advance_turns={"mysticism": 4},
+        )
+
+        self.assertEqual(discount_advances(player, 4), [])
+
+    def test_earlier_turns_still_discount(self) -> None:
+        player = PlayerState(
+            "Hellas", "M", "WEST",
+            advances=["mysticism", "pottery"],
+            advance_turns={"mysticism": 3, "pottery": 4},
+        )
+
+        self.assertEqual(discount_advances(player, 4), ["mysticism"])
+
+    def test_row_chain_ignores_a_same_turn_card(self) -> None:
+        player = PlayerState(
+            "Hellas", "M", "WEST",
+            advances=["mysticism"],
+            advance_turns={"mysticism": 4},
+        )
+        monument = ADVANCE_BY_ID["monument"]
+
+        same_turn = advance_price(
+            monument, player, 12, owned=discount_advances(player, 4)
+        )
+        next_turn = advance_price(
+            monument, player, 12, owned=discount_advances(player, 5)
+        )
+
+        self.assertEqual(same_turn.special_discount, 0)
+        self.assertEqual(next_turn.special_discount, 10)
+
+    def test_colour_credit_also_waits_a_turn(self) -> None:
+        player = PlayerState(
+            "Hellas", "M", "WEST",
+            advances=["pottery"],
+            advance_turns={"pottery": 2},
+        )
+
+        same_turn = color_credits(player, 12, owned=discount_advances(player, 2))
+        next_turn = color_credits(player, 12, owned=discount_advances(player, 3))
+
+        self.assertEqual(same_turn["CRAFT"], 0)
+        self.assertEqual(next_turn["CRAFT"], 10)
 
 
 if __name__ == "__main__":

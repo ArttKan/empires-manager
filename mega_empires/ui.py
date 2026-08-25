@@ -25,7 +25,12 @@ from .data import (
     default_block,
     scenario_civilizations,
 )
-from .credits import advance_price, color_credits, flexible_credit_entitlement
+from .credits import (
+    advance_price,
+    color_credits,
+    discount_advances,
+    flexible_credit_entitlement,
+)
 from .models import GameState, PlayerState
 from .scoring import calculate_score, players_in_ast_order, visible_rankings
 from .config import load_server_config
@@ -889,12 +894,22 @@ class AdvanceDialog(tk.Toplevel):
                 values[group] = 0
         return values
 
+    def _discounting_advances(self) -> list[str]:
+        """Kortit joista alennus lasketaan: vain aiempien kierrosten ostot.
+
+        Hankintavaihe on yhtäaikainen, joten saman kierroksen kortit eivät
+        alenna toisiaan silloinkaan kun ostot kirjataan useassa erässä.
+        """
+
+        return discount_advances(self.player, self.game.round_number)
+
     def _refresh_credit_display(self) -> None:
         flexible = self._working_flexible_credits()
         totals = color_credits(
             self.player,
             self.game.player_count,
             flexible,
+            owned=self._discounting_advances(),
         )
         for group, label in self.credit_value_labels.items():
             label.configure(text=f"{totals[group]} credit")
@@ -975,6 +990,7 @@ class AdvanceDialog(tk.Toplevel):
                 self.player,
                 self.game.player_count,
                 self._working_flexible_credits(),
+                owned=self._discounting_advances(),
             )
             label = advance.name
             price_label = (

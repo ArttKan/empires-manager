@@ -22,6 +22,27 @@ class AdvancePrice:
     applied_group: str
 
 
+def discount_advances(player: PlayerState, round_number: int) -> list[str]:
+    """Kortit jotka antavat alennusta tällä kierroksella.
+
+    Hankintavaihe on yhtäaikainen: saman kierroksen aikana ostetut kortit eivät
+    alenna toistensa hintaa, vaikka ne kirjattaisiin useassa erässä. Alennuksen
+    antavat siis vain aiempien kierrosten kortit.
+
+    Leimaton kortti tulkitaan vanhaksi. Näin ennen tätä muutosta tallennetut
+    pelit käyttäytyvät kuten ennenkin eivätkä menetä alennuksiaan kesken pelin.
+    """
+
+    turns = player.advance_turns
+    if not turns:
+        return list(player.advances)
+    return [
+        advance_id
+        for advance_id in player.advances
+        if turns.get(advance_id, 0) < round_number
+    ]
+
+
 def starting_color_credit(player_count: int) -> int:
     """Palauta sääntöjen mukainen kaikille väreille annettava alkukrediitti."""
 
@@ -45,8 +66,13 @@ def color_credits(
     player: PlayerState,
     player_count: int,
     flexible_credits: dict[str, int] | None = None,
+    owned: list[str] | None = None,
 ) -> dict[str, int]:
-    """Laske aiemmin tallennettujen korttien pysyvät värikrediitit."""
+    """Laske aiemmin tallennettujen korttien pysyvät värikrediitit.
+
+    `owned` rajaa laskennan tiettyyn korttijoukkoon; hinnoittelussa se on
+    `discount_advances()`, jotta saman kierroksen ostot eivät alenna toisiaan.
+    """
 
     base = starting_color_credit(player_count)
     allocations = (
@@ -58,7 +84,7 @@ def color_credits(
         group: base + max(0, int(allocations.get(group, 0)))
         for group in ADVANCE_GROUPS
     }
-    for advance_id in player.advances:
+    for advance_id in (player.advances if owned is None else owned):
         advance = ADVANCE_BY_ID.get(advance_id)
         if advance is None:
             continue
@@ -87,16 +113,23 @@ def advance_price(
     player: PlayerState,
     player_count: int,
     flexible_credits: dict[str, int] | None = None,
+    owned: list[str] | None = None,
 ) -> AdvancePrice:
     """Laske kortin hinta aiemmin tallennetuilla krediiteillä.
 
     Kaksivärisellä kortilla käytetään vain suurempaa värikrediittiä.
+
+    `owned` on se korttijoukko joka antaa alennusta. Kutsujan pitää antaa siihen
+    `discount_advances(player, round_number)`, muuten saman kierroksen ostot
+    alentavat toisiaan — mitä säännöt eivät salli.
     """
 
-    totals = color_credits(player, player_count, flexible_credits)
+    totals = color_credits(player, player_count, flexible_credits, owned)
     applied_group = max(advance.groups, key=lambda group: totals[group])
     color_discount = totals[applied_group]
-    row_discount = special_credit(advance.id, player.advances)
+    row_discount = special_credit(
+        advance.id, player.advances if owned is None else owned
+    )
     return AdvancePrice(
         base_cost=advance.cost,
         color_discount=color_discount,

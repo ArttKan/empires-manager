@@ -327,7 +327,14 @@ class LocalGameService(GameService):
         actor: str = "",
     ) -> CommandResult:
         player = self._checked_player(civilization, expected_version)
+        # Uudet kortit leimataan kuluvalle kierrokselle. Vanhojen leima säilyy,
+        # jotta useassa erässä kirjattu osto ei siirrä niitä eteenpäin.
+        previous = set(player.advances)
+        turn = self._game.round_number
         player.advances = list(advances)
+        for advance_id in player.advances:
+            if advance_id not in previous:
+                player.advance_turns[advance_id] = turn
         if flexible_credits is not None:
             player.flexible_credits = dict(flexible_credits)
         return self._commit(

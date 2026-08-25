@@ -44,6 +44,7 @@ from pydantic import BaseModel
 from mega_empires.credits import (
     advance_price,
     color_credits,
+    discount_advances,
     flexible_credit_entitlement,
 )
 from mega_empires.data import ADVANCES
@@ -381,10 +382,17 @@ async def advance_catalogue(
         )
 
     owned = set(player.advances)
-    totals = color_credits(player, game.player_count)
+    # Alennukset lasketaan vain aiempien kierrosten korteista: hankintavaihe on
+    # yhtäaikainen, joten saman kierroksen ostot eivät alenna toisiaan silloinkaan
+    # kun pelaaja kirjaa ne useassa erässä.
+    discounting = discount_advances(player, game.round_number)
+    locked = set(discounting)
+    totals = color_credits(player, game.player_count, owned=discounting)
     entries = []
     for advance in ADVANCES:
-        price = advance_price(advance, player, game.player_count)
+        price = advance_price(
+            advance, player, game.player_count, owned=discounting
+        )
         entries.append(
             {
                 "id": advance.id,
@@ -393,6 +401,8 @@ async def advance_catalogue(
                 "vp": advance.victory_points,
                 "groups": list(advance.groups),
                 "owned": advance.id in owned,
+                # Aiempien kierrosten kortit ovat pysyviä: niitä ei voi purkaa.
+                "locked": advance.id in locked,
                 "effective_cost": price.effective_cost,
                 "color_discount": price.color_discount,
                 "row_discount": price.special_discount,
@@ -478,6 +488,24 @@ async def set_advances(
     authorize(principal, civilization, "advances")
     check_phase(principal, "advances")
     service = get_service()
+    if not principal.is_admin:
+        game = service.snapshot()
+        player = next(
+            (p for p in game.players if p.civilization == civilization), None
+        )
+        if player is not None:
+            # Aiempien kierrosten kortit ovat pysyviä. Vain kuluvan kierroksen
+            # ostoja saa perua, jotta näppäilyvirheen voi korjata heti.
+            permanent = set(discount_advances(player, game.round_number))
+            removed = permanent - set(body.advances)
+            if removed:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Advances bought on earlier turns cannot be removed: "
+                        + ", ".join(sorted(removed))
+                    ),
+                )
     return await execute(
         lambda: service.set_advances(
             civilization,
@@ -793,9 +821,11 @@ async def player_app() -> HTMLResponse:
     """
 
     html = (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8")
+    # X-Build kertoo mikä versio asiakkaalle meni. Sivu on yksi versioimaton
+    # tiedosto, joten ilman tätä ei voi todeta ajaako puhelin nykyistä koodia.
     build = hashlib.sha256(html.encode("utf-8")).hexdigest()[:8]
     return HTMLResponse(
-        html.replace("{{BUILD}}", build),
+        html,
         headers={
             "Cache-Control": "no-store, must-revalidate",
             "X-Build": build,

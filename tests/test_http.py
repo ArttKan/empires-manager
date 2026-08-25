@@ -294,7 +294,7 @@ class AdvanceCatalogueTests(HttpTestCase):
         self.assertEqual(
             set(first),
             {
-                "id", "name", "cost", "vp", "groups", "owned",
+                "id", "name", "cost", "vp", "groups", "owned", "locked",
                 "effective_cost", "color_discount", "row_discount",
                 "applied_group",
             },
@@ -322,11 +322,15 @@ class AdvanceCatalogueTests(HttpTestCase):
         ).json()
         before = {a["id"]: a["effective_cost"] for a in catalogue["advances"]}
 
-        # Pottery antaa CRAFT 10 / ART 5.
+        # Pottery antaa CRAFT 10 / ART 5, mutta vasta seuraavalla kierroksella:
+        # saman kierroksen ostot eivät alenna toisiaan.
         self.client.post(
             "/players/Hellas/advances",
             json={"advances": ["pottery"]},
             headers=AUTH,
+        )
+        self.client.post(
+            "/turn", json={"round_number": 2, "current_phase": 12}, headers=AUTH
         )
         catalogue = self.client.get(
             "/players/Hellas/advances", headers=AUTH
@@ -349,6 +353,9 @@ class AdvanceCatalogueTests(HttpTestCase):
             json={"advances": ["mysticism"]},
             headers=AUTH,
         )
+        self.client.post(
+            "/turn", json={"round_number": 2, "current_phase": 12}, headers=AUTH
+        )
 
         body = self.client.get(
             "/players/Hellas/advances", headers=AUTH
@@ -356,6 +363,49 @@ class AdvanceCatalogueTests(HttpTestCase):
         monument = [a for a in body["advances"] if a["id"] == "monument"][0]
 
         self.assertEqual(monument["row_discount"], 10)
+
+    def test_same_turn_purchases_do_not_discount_each_other(self) -> None:
+        """Hankintavaihe on yhtäaikainen, myös useassa erässä kirjattuna."""
+
+        self.client.post(
+            "/turn", json={"round_number": 3, "current_phase": 12}, headers=AUTH
+        )
+        before = {
+            a["id"]: a["effective_cost"]
+            for a in self.client.get(
+                "/players/Hellas/advances", headers=AUTH
+            ).json()["advances"]
+        }
+
+        # Ensimmäinen erä: Mysticism (ART 5 / RELIGION 5, ja rivin 1 VP -kortti).
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism"]},
+            headers=AUTH,
+        )
+        body = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+        after = {a["id"]: a["effective_cost"] for a in body["advances"]}
+        monument = [a for a in body["advances"] if a["id"] == "monument"][0]
+
+        # Toinen erä samalla kierroksella näkee samat hinnat kuin ensimmäinen.
+        self.assertEqual(after["monument"], before["monument"])
+        self.assertEqual(monument["row_discount"], 0)
+        # 3 pelaajan alkukrediitti on 10 per väri; Mysticismin RELIGION 5 ei
+        # vielä näy, koska se ostettiin tällä kierroksella.
+        self.assertEqual(body["credits"]["RELIGION"], 10)
+
+        # Seuraavalla kierroksella alennus alkaa vaikuttaa.
+        self.client.post(
+            "/turn", json={"round_number": 4, "current_phase": 12}, headers=AUTH
+        )
+        later = self.client.get(
+            "/players/Hellas/advances", headers=AUTH
+        ).json()
+        monument = [a for a in later["advances"] if a["id"] == "monument"][0]
+        self.assertEqual(monument["row_discount"], 10)
+        self.assertEqual(later["credits"]["RELIGION"], 15)
 
     def test_flexible_credit_entitlement_is_reported(self) -> None:
         self.client.post(
@@ -389,6 +439,87 @@ class AdvanceCatalogueTests(HttpTestCase):
             self.client.get("/players/Atlantis/advances", headers=AUTH).status_code,
             404,
         )
+
+
+class PermanentAdvanceTests(HttpTestCase):
+    """Aiemman kierroksen kortti on ostettu; sitä ei voi perua puhelimelta."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+        self.player = {
+            "Authorization": "Bearer "
+            + store.claim(store.join_code, "Hellas", "now")
+        }
+        # Kierros 1: osta Mysticism. Kierros 2: se on pysyvä.
+        self.client.post(
+            "/turn", json={"round_number": 1, "current_phase": 12}, headers=AUTH
+        )
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism"]},
+            headers=self.player,
+        )
+        self.client.post(
+            "/turn", json={"round_number": 2, "current_phase": 12}, headers=AUTH
+        )
+
+    def test_catalogue_marks_earlier_cards_as_locked(self) -> None:
+        body = self.client.get(
+            "/players/Hellas/advances", headers=self.player
+        ).json()
+
+        locked = {a["id"] for a in body["advances"] if a["locked"]}
+        self.assertEqual(locked, {"mysticism"})
+
+    def test_player_cannot_drop_an_earlier_card(self) -> None:
+        response = self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["pottery"]},
+            headers=self.player,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("mysticism", response.json()["detail"])
+        state = self.client.get("/state", headers=AUTH).json()
+        hellas = [p for p in state["players"] if p["civilization"] == "Hellas"][0]
+        self.assertEqual(hellas["advances"], ["mysticism"])
+
+    def test_player_may_add_alongside_an_earlier_card(self) -> None:
+        response = self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism", "pottery"]},
+            headers=self.player,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_player_may_undo_a_card_bought_this_turn(self) -> None:
+        """Näppäilyvirheen on voitava korjata saman vaiheen aikana."""
+
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism", "pottery"]},
+            headers=self.player,
+        )
+
+        response = self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism"]},
+            headers=self.player,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_may_correct_anything(self) -> None:
+        response = self.client.post(
+            "/players/Hellas/advances", json={"advances": []}, headers=AUTH
+        )
+
+        self.assertEqual(response.status_code, 200)
 
 
 class ScopeTests(HttpTestCase):
