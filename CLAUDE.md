@@ -28,7 +28,9 @@ own data from phones. See "Backend conversion" below.
 |---|---|
 | Conversation with the user | **English** (user's explicit instruction, overrides `AGENTS.md`) |
 | This file | English |
-| All user-visible GUI strings | **English** — must match the rulebooks and printed components |
+| Desktop app (`ui.py`) user-visible strings | **English** — must match the rulebooks and printed components |
+| Player PWA (`web/`) user-visible strings | **Finnish** chrome, **English** domain terms (Civilization Advance, Census, A.S.T., civilization names) |
+| HTTP API messages (`detail` fields) | **English** — part of the interface, asserted in tests; the PWA supplies its own Finnish text per status code |
 | Source code comments and docstrings | **Finnish** — match the existing style |
 | `PROJEKTI.md`, `KAYTTOOHJE.md`, `deploy/README.md`, commit messages | **Finnish** |
 
@@ -39,8 +41,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 155 tests
-python3 -m unittest discover -v             # 123 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 203 tests
+python3 -m unittest discover -v             # 144 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```

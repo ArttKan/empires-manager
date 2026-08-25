@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -56,29 +56,29 @@
   <!-- ── liittyminen ───────────────────────────────────────────── -->
   <section id="join-code">
     <h1>Mega Empires</h1>
-    <p class="sub">Enter the game code shown on the TV.</p>
-    <label for="code">Game code</label>
+    <p class="sub">Syötä pelikoodi, joka näkyy televisiossa.</p>
+    <label for="code">Pelikoodi</label>
     <input id="code" type="text" inputmode="latin" autocomplete="off"
            autocapitalize="characters" maxlength="8" placeholder="ABCDE">
-    <button id="code-go">Continue</button>
+    <button id="code-go">Jatka</button>
     <div id="code-msg" class="msg hidden"></div>
   </section>
 
   <!-- ── paikan valinta ───────────────────────────────────────── -->
   <section id="join-seat" class="hidden">
-    <h1>Pick your civilization</h1>
-    <p class="sub">Choose the one you are playing. Ask the game master to free a seat if yours is already taken.</p>
+    <h1>Valitse sivilisaatiosi</h1>
+    <p class="sub">Valitse se, jolla pelaat. Jos paikkasi on jo varattu, pyydä pelinjohtajaa vapauttamaan se.</p>
     <div id="seats"></div>
-    <button id="seat-back" class="secondary">Back</button>
+    <button id="seat-back" class="secondary">Takaisin</button>
     <div id="seat-msg" class="msg hidden"></div>
   </section>
 
   <!-- ── pelinäkymä (tulossa) ─────────────────────────────────── -->
   <section id="play" class="hidden">
     <h1 id="play-civ">—</h1>
-    <p class="sub" id="play-sub">Connected.</p>
-    <div class="msg info">Your row goes here next.</div>
-    <button id="leave" class="secondary">Leave this device</button>
+    <p class="sub" id="play-sub">Yhteys muodostettu.</p>
+    <div class="msg info">Oma rivisi tulee tähän.</div>
+    <button id="leave" class="secondary">Poistu tältä laitteelta</button>
   </section>
 
 </div>
@@ -126,7 +126,7 @@ async function submitCode() {
   const code = el("code").value.trim().toUpperCase();
   if (!code) return;
   el("code-go").disabled = true;
-  message("code-msg", "Checking…", "info");
+  message("code-msg", "Tarkistetaan…", "info");
   const { ok, status, body } = await api("/join/roster", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -134,11 +134,14 @@ async function submitCode() {
   });
   el("code-go").disabled = false;
   if (!ok) {
-    message("code-msg",
-      status === 429
-        ? "Too many attempts. Wait a few minutes."
-        : (body && body.detail) || "That code did not work.",
-      "error");
+    // Palvelimen viestit ovat englanniksi, koska ne ovat osa HTTP-rajapintaa.
+    // Käyttäjälle näytetään sivun omat suomenkieliset tekstit.
+    const texts = {
+      403: "Koodi ei kelvannut. Tarkista se televisiosta.",
+      429: "Liian monta yritystä. Odota muutama minuutti.",
+      503: "Palvelimella ei ole käynnissä olevaa peliä.",
+    };
+    message("code-msg", texts[status] || "Yhteys palvelimeen ei onnistunut.", "error");
     return;
   }
   message("code-msg", "", "info");
@@ -156,25 +159,26 @@ function renderSeats(players) {
     button.disabled = player.claimed;
     button.innerHTML =
       `<span class="name">${player.civilization}</span>` +
-      (player.claimed ? `<span class="taken">taken</span>` : "");
+      (player.claimed ? `<span class="taken">varattu</span>` : "");
     button.onclick = () => claim(player.civilization);
     box.appendChild(button);
   }
 }
 
 async function claim(civilization) {
-  message("seat-msg", "Joining…", "info");
+  message("seat-msg", "Liitytään…", "info");
   const { ok, status, body } = await api("/join", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code: joinCode, civilization }),
   });
   if (!ok) {
-    message("seat-msg",
-      status === 409
-        ? `${civilization} was just taken. Ask the game master to free it.`
-        : (body && body.detail) || "Could not join.",
-      "error");
+    const texts = {
+      403: "Koodi ei enää kelpaa. Palaa takaisin ja syötä se uudelleen.",
+      409: `${civilization} ehdittiin juuri varata. Pyydä pelinjohtajaa vapauttamaan se.`,
+      429: "Liian monta yritystä. Odota muutama minuutti.",
+    };
+    message("seat-msg", texts[status] || "Liittyminen ei onnistunut.", "error");
     // Näytä tuore tilanne: joku muu ehti väliin.
     const refreshed = await api("/join/roster", {
       method: "POST",
@@ -202,7 +206,7 @@ el("code").addEventListener("keydown", (e) => {
 });
 el("seat-back").onclick = () => { show("join-code"); };
 el("leave").onclick = () => {
-  if (confirm("Leave this device? You will need the game code to join again.")) {
+  if (confirm("Poistutaanko tältä laitteelta? Tarvitset pelikoodin liittyäksesi uudelleen.")) {
     session.clear();
     show("join-code");
   }
