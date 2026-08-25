@@ -116,26 +116,26 @@
     flex: 1; text-align: center; padding: 8px 2px; border-radius: 8px;
     font-size: .75rem; font-weight: 700; color: #101010;
   }
-  .adv {
+  .card {
     display: flex; align-items: center; gap: 10px;
     width: 100%; padding: 12px 14px; margin-bottom: 6px; text-align: left;
     background: var(--panel); color: var(--text);
     border: 1px solid #344258; border-left-width: 6px; border-radius: 10px;
   }
-  .adv.owned { border-color: var(--accent); background: var(--panel-alt); }
-  .adv:disabled { opacity: 1; }   /* katselutila: kortit näkyvät normaalisti */
-  .adv .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
-  .adv .body { flex: 1; min-width: 0; }
-  .adv .nm { font-size: 1rem; }
-  .adv .meta { color: var(--muted); font-size: .78rem; margin-top: 2px; }
-  .adv .price { text-align: right; font-variant-numeric: tabular-nums; }
-  .adv .price .now { font-size: 1.05rem; font-weight: 700; }
-  .adv .price .was { color: var(--muted); font-size: .75rem; text-decoration: line-through; }
-  .adv-head {
+  .card.owned { border-color: var(--accent); background: var(--panel-alt); }
+  .card:disabled { opacity: 1; }   /* katselutila: kortit näkyvät normaalisti */
+  .card .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
+  .card .body { flex: 1; min-width: 0; }
+  .card .nm { font-size: 1rem; }
+  .card .meta { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+  .card .price { text-align: right; font-variant-numeric: tabular-nums; }
+  .card .price .now { font-size: 1.05rem; font-weight: 700; }
+  .card .price .was { color: var(--muted); font-size: .75rem; text-decoration: line-through; }
+  .cards-head {
     display: flex; justify-content: space-between; align-items: center;
     gap: 10px; margin-bottom: 12px;
   }
-  .adv-head button { width: auto; margin: 0; padding: 12px 18px; }
+  .cards-head button { width: auto; margin: 0; padding: 12px 18px; }
   /* ── välilehdet ───────────────────────────────────────────── */
   /* Palkki on kuoren jäsen eikä vierivää sisältöä: se ei liiku, joten
      ylivieritys ei paljasta sen alta mitään eikä sitä tarvitse piirtää
@@ -231,10 +231,10 @@
       <input id="census" type="number" inputmode="numeric" min="0" max="55">
     </div>
 
-    <div class="control" id="adv-box">
+    <div class="control" id="cards-box">
       <div class="label">Civilization Advances</div>
-      <div id="adv-summary" class="stepper" style="font-size:1.1rem">—</div>
-      <button id="adv-open" class="secondary" style="margin-top:12px">Buy Advances</button>
+      <div id="cards-summary" class="stepper" style="font-size:1.1rem">—</div>
+      <button id="cards-open" class="secondary" style="margin-top:12px">Buy Advances</button>
     </div>
 
     <div id="play-msg" class="msg hidden"></div>
@@ -248,24 +248,24 @@
   </section>
 
   <!-- ── Civilization Advances ────────────────────────────────── -->
-  <section id="advances" class="hidden">
-    <div class="adv-head">
+  <section id="cards" class="hidden">
+    <div class="cards-head">
       <div>
         <h1 style="margin:0">Advances</h1>
-        <p class="sub" style="margin:2px 0 0" id="adv-sub"></p>
+        <p class="sub" style="margin:2px 0 0" id="cards-sub"></p>
       </div>
-      <button id="adv-cancel" class="secondary">Cancel</button>
+      <button id="cards-cancel" class="secondary">Cancel</button>
     </div>
-    <div class="credits" id="adv-credits"></div>
-    <div id="adv-list"></div>
-    <div id="adv-note" class="msg info hidden">
+    <div class="credits" id="cards-credits"></div>
+    <div id="cards-list"></div>
+    <div id="cards-note" class="msg info hidden">
       Advances are bought in phase 12. You can look at the list and the prices
       now, but not change it.
     </div>
     <div class="sticky-save">
-      <button id="adv-save">Save</button>
+      <button id="cards-save">Save</button>
     </div>
-    <div id="adv-msg" class="msg hidden"></div>
+    <div id="cards-msg" class="msg hidden"></div>
   </section>
 
 </div>
@@ -289,7 +289,7 @@ const el = (id) => document.getElementById(id);
 const TABBED = ["play", "board"];   // näkymät joissa välilehtipalkki näkyy
 
 const show = (id) => {
-  for (const s of ["join-code", "join-seat", "play", "board", "advances"]) {
+  for (const s of ["join-code", "join-seat", "play", "board", "cards"]) {
     el(s).classList.toggle("hidden", s !== id);
   }
   // Palkki piilotetaan liittymisen ja Advances-arkin ajaksi: kesken oston
@@ -495,7 +495,7 @@ function render() {
 
   // Lista avautuu aina: omien korttien katsominen ei ole muokkaamista, ja
   // pelaajan pitää nähdä mitä hänellä on missä tahansa vaiheessa.
-  el("adv-open").textContent = gateOpen("advances")
+  el("cards-open").textContent = gateOpen("cards")
     ? "Buy Advances"
     : "View Advances";
   renderAdvanceSummary();
@@ -646,7 +646,7 @@ let selection = null;   // muokattava valinta; tallennetaan vasta Savella
 
 async function openAdvances() {
   const saved = session.read();
-  message("adv-msg", "", "info");
+  message("cards-msg", "", "info");
   const { ok, body } = await api(
     "/players/" + encodeURIComponent(saved.civilization) + "/advances",
     { headers: authHeaders() }
@@ -666,12 +666,12 @@ async function openAdvances() {
     ...body.advances.filter((a) => !a.owned),
   ];
   renderAdvances();
-  show("advances");
+  show("cards");
   window.scrollTo(0, 0);
 }
 
 function renderCredits() {
-  const box = el("adv-credits");
+  const box = el("cards-credits");
   box.innerHTML = "";
   for (const group of ["ART", "CIVIC", "CRAFT", "RELIGION", "SCIENCE"]) {
     const cell = document.createElement("div");
@@ -692,19 +692,19 @@ function renderAdvances() {
   const editable = advancesEditable();
   const owned = catalogue.advances.filter((a) => selection.has(a.id));
   const points = owned.reduce((sum, a) => sum + a.vp, 0);
-  el("adv-sub").textContent =
+  el("cards-sub").textContent =
     owned.length + " selected · " + points + " VP" +
     (editable ? "" : " · view only");
-  el("adv-save").classList.toggle("hidden", !editable);
-  el("adv-note").classList.toggle("hidden", editable);
-  el("adv-cancel").textContent = editable ? "Cancel" : "Back";
+  el("cards-save").classList.toggle("hidden", !editable);
+  el("cards-note").classList.toggle("hidden", editable);
+  el("cards-cancel").textContent = editable ? "Cancel" : "Back";
 
-  const list = el("adv-list");
+  const list = el("cards-list");
   list.innerHTML = "";
   for (const advance of ordered) {
     const chosen = selection.has(advance.id);
     const button = document.createElement("button");
-    button.className = "adv" + (chosen ? " owned" : "");
+    button.className = "card" + (chosen ? " owned" : "");
     button.style.borderLeftColor = GROUP_COLORS[advance.groups[0]];
 
     // Hinta näytetään vain kortille jota ei vielä omista: omistetulla se on
@@ -736,8 +736,8 @@ function renderAdvances() {
 }
 
 async function saveAdvances() {
-  el("adv-save").disabled = true;
-  message("adv-msg", "Saving…", "info");
+  el("cards-save").disabled = true;
+  message("cards-msg", "Saving…", "info");
   const saved = session.read();
   const { ok, status } = await api(
     "/players/" + encodeURIComponent(saved.civilization) + "/advances",
@@ -751,25 +751,25 @@ async function saveAdvances() {
       }),
     }
   );
-  el("adv-save").disabled = false;
+  el("cards-save").disabled = false;
   if (ok) {
     await refresh();
     show("play");
     return;
   }
   if (status === 409) {
-    message("adv-msg", ENTRY_FAILED, "error");
+    message("cards-msg", ENTRY_FAILED, "error");
     await refresh();
     await openAdvances();
     return;
   }
-  message("adv-msg", ENTRY_FAILED, "error");
+  message("cards-msg", ENTRY_FAILED, "error");
 }
 
 function renderAdvanceSummary() {
   if (!me) return;
   const count = me.advances.length;
-  el("adv-summary").textContent =
+  el("cards-summary").textContent =
     count === 0 ? "none yet" : count + " cards · " + me.score.advances + " VP";
 }
 
@@ -834,9 +834,9 @@ scroller.addEventListener("touchend", async () => {
 el("tab-me").onclick = () => show("play");
 el("tab-board").onclick = () => { renderBoard(); show("board"); };
 
-el("adv-open").onclick = openAdvances;
-el("adv-cancel").onclick = () => { show("play"); };
-el("adv-save").onclick = saveAdvances;
+el("cards-open").onclick = openAdvances;
+el("cards-cancel").onclick = () => { show("play"); };
+el("cards-save").onclick = saveAdvances;
 
 el("cities-down").onclick = () => changeCities(-1);
 el("cities-up").onclick = () => changeCities(1);
