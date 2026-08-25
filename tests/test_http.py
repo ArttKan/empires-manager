@@ -267,6 +267,13 @@ class PlayerAppTests(HttpTestCase):
         self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("Mega Empires", response.text)
 
+    def test_page_is_never_cached(self) -> None:
+        """Sovellus on yksi versioimaton tiedosto: välimuisti jäädyttäisi sen."""
+
+        response = self.client.get("/")
+
+        self.assertIn("no-store", response.headers.get("cache-control", ""))
+
     def test_page_carries_no_token_or_game_data(self) -> None:
         response = self.client.get("/")
 

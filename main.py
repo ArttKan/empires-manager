@@ -778,18 +778,28 @@ WEB_DIRECTORY = Path(__file__).resolve().parent / "web"
 
 
 @app.get("/", response_class=HTMLResponse)
-async def player_app() -> str:
+async def player_app() -> HTMLResponse:
     """Pelaajien sivu.
 
     Yksi sivu, joka näyttää liittymislomakkeen tai oman rivin sen mukaan onko
     selaimessa tallennettu token. Näin pöydässä luetaan ääneen vain domain,
     ei polkua sen perässä.
+
+    `no-store`, koska sivu päivittyy tiheästi eikä siinä ole versioituja
+    tiedostonimiä. Ilman sitä selain käyttää heuristista välimuistia ja puhelin
+    voi jäädä pyörittämään vanhaa versiota pitkäksi aikaa — ja koska koko
+    sovellus on yksi tiedosto, se tarkoittaa koko sovellusta.
     """
 
-    return (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(
+        (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @app.get("/sse-test", response_class=HTMLResponse)
-async def sse_test() -> str:
+async def sse_test() -> HTMLResponse:
     with open("sse-test.html", encoding="utf-8") as stream:
-        return stream.read()
+        return HTMLResponse(
+            stream.read(), headers={"Cache-Control": "no-store"}
+        )
