@@ -41,8 +41,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 259 tests
-python3 -m unittest discover -v             # 170 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 261 tests
+python3 -m unittest discover -v             # 172 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
@@ -290,9 +290,18 @@ Rules that fall out of remote mode and must not be undone:
   compares `state_version` and redraws only on change — no SSE client, no threads
   in Tkinter. A failed poll backs off from 2 s to 15 s, because `urllib` blocks the
   mainloop and hammering a dead server would freeze the UI.
-- **A lost connection is not a state change.** `ServiceUnavailable` keeps the
-  current view; only `CommandError` subclasses that mean rejection surface as
-  dialogs.
+- **A lost connection is not a state change.** A failed poll keeps the current
+  view and never interrupts — a five-second wifi blip must not throw a modal in
+  front of the game master. `ServiceUnavailable` surfaces a dialog only when the
+  user *attempted a command*, because then they must know the change did not save.
+- **An outage must name the way out.** The mirror is on disk, but `_offer_offline`
+  is reachable only from startup, so a box that dies mid-game leaves the view
+  frozen and looking correct. The offline header and the outage dialog therefore
+  both carry `OFFLINE_HINT` — "Restart the app to continue on this computer."
+  Without it the fallback is undiscoverable by anyone who did not build it. The
+  header carries the hint and *not* the urllib error, which is unreadable on a TV;
+  the raw reason goes in the dialog, where diagnosing the network is the question
+  actually being asked.
 - **Never auto-retry a `VersionConflict`.** Retrying with the old value overwrites
   whatever the other device just wrote. `_run_command()` refreshes the view and
   tells the user instead.

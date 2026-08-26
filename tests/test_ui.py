@@ -659,6 +659,43 @@ class RemoteModeTests(unittest.TestCase):
         self.assertTrue(info.called)
         self.assertEqual(self.app.game.state_version, 5)
 
+    def test_outage_during_a_command_says_the_change_was_not_saved(self) -> None:
+        """Katko ei ole hylkäys, joten näkymä jää ennalleen ja näyttää oikealta.
+
+        Ilman nimenomaista ilmoitusta pelinjohtaja luulisi muutoksen menneen
+        perille, eikä mikään kertoisi että peiliin pääsee käynnistämällä uudelleen.
+        """
+
+        def unreachable():
+            raise ServiceUnavailable(
+                "<urlopen error [Errno 111] Connection refused>"
+            )
+
+        with mock.patch.object(ui_module.messagebox, "showerror") as shown:
+            accepted = self.app._run_command(unreachable)
+
+        self.assertFalse(accepted)
+        message = shown.call_args[0][1]
+        self.assertIn("was not saved", message)
+        # Syy kuuluu tähän dialogiin: juuri tässä kysytään onko vika verkossa.
+        self.assertIn("Connection refused", message)
+        self.assertIn(ui_module.OFFLINE_HINT, message)
+
+    def test_offline_header_gives_the_route_back(self) -> None:
+        """Rivi luetaan televisiosta: ohje on hyödyllinen, urllibin teksti ei."""
+
+        self.app.service = _StubRemote([self._game()])
+        self.app._connected = False
+        self.app._connection_message = (
+            "<urlopen error [Errno 111] Connection refused>"
+        )
+
+        text = self.app._connection_text()
+
+        self.assertIn("OFFLINE", text)
+        self.assertIn(ui_module.OFFLINE_HINT, text)
+        self.assertNotIn("urlopen", text)
+
     def test_subtitle_shows_phone_status_in_remote_mode(self) -> None:
         """Pelinjohtajan on tiedettävä kenen tiedot hän kirjaa itse."""
 

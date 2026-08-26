@@ -83,6 +83,11 @@ CENSUS_DEBOUNCE_MS = 400
 # muuttuu. Ilman peiliä varatila olisi hyödytön: peli on palvelimella, joten
 # ilman kopiota paikallinen tila aloittaisi tyhjästä kesken pelin.
 MIRROR_SAVE_NAME = "palvelinpeli"
+
+# Yhteyskatkon ohje. Peilikopio on levyllä, mutta siihen pääsee käsiksi vain
+# käynnistyksen kautta (`_offer_offline`), joten katkon sattuessa käyttäjälle on
+# kerrottava reitti — muuten näkymä vain jähmettyy eikä mikään kerro mitä tehdä.
+OFFLINE_HINT = "Restart the app to continue on this computer."
 AST_ERA_COLORS = (
     "#354252",
     "#51463f",
@@ -2721,6 +2726,19 @@ class MegaEmpiresApp:
                 parent=parent or self.root,
             )
             return False
+        except ServiceUnavailable as error:
+            # Katko ei ole hylkäys: tila palvelimella on yhä se mitä se oli.
+            # Käyttäjän on silti tiedettävä ettei muutos mennyt perille.
+            messagebox.showerror(
+                "Not connected to the server",
+                "The change was not saved — the server could not be reached.\n\n"
+                f"{error}\n\n"
+                "The board is showing the last state received from the "
+                "server, and the game so far has been saved on this "
+                f"computer.\n\n{OFFLINE_HINT}",
+                parent=parent or self.root,
+            )
+            return False
         except CommandError as error:
             messagebox.showerror(
                 "Command failed",
@@ -2975,7 +2993,7 @@ class MegaEmpiresApp:
             return "Autosave enabled"
         if getattr(self, "_connected", True):
             return f"Connected to {self.service.base_url}"
-        return f"OFFLINE — {getattr(self, '_connection_message', '')}"
+        return f"OFFLINE — cannot reach the server. {OFFLINE_HINT}"
 
     def _change_round(self, amount: int) -> None:
         if self.game is None or self.service is None:
