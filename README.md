@@ -16,8 +16,20 @@ to use mid-game over being defensive about input.
 
 ## Running the desktop app
 
-Needs **Python 3.10 or newer** and tkinter. Nothing else — the desktop app is
-standard library only, with no virtualenv and no install step.
+Needs **Python 3.10 or newer** with tkinter. Nothing else — the desktop app is
+standard library only, so there is no virtualenv and no install step.
+
+**Windows.** Install Python from [python.org](https://www.python.org/downloads/)
+and tick *Add python.exe to PATH*; tkinter comes with it. Then, in PowerShell or
+Command Prompt, from the folder you cloned into:
+
+```powershell
+python app.py
+```
+
+If `python` opens the Microsoft Store instead, use `py app.py`.
+
+**Linux.** tkinter is usually packaged separately:
 
 ```bash
 sudo apt install python3-tk        # Debian/Ubuntu; other distros vary
@@ -29,8 +41,11 @@ Saved games are written to `tallennukset/` beside the code, or to whatever
 
 ## Playing against a server
 
-If `~/.config/mega-empires/config.json` exists, the app connects to that server
-instead of opening a local save:
+If a config file exists, the app connects to that server instead of opening a
+local save. It lives in your home directory:
+
+- **Windows:** `C:\Users\<you>\.config\mega-empires\config.json`
+- **Linux / macOS:** `~/.config/mega-empires/config.json`
 
 ```json
 {
@@ -49,9 +64,10 @@ checkout and the test suite work with no setup.
 ## Tests
 
 ```bash
-python3 -m unittest discover
+python3 -m unittest discover        # Linux / macOS
+python -m unittest discover         # Windows
 ```
 
 The HTTP and remote-service tests need the server dependencies from
-`requirements.txt` and skip themselves when those are missing, so a green run
-under bare `python3` covers the game logic and the desktop app only.
+`requirements.txt` and skip themselves when those are missing, so a plain run
+covers the game logic and the desktop app only.
