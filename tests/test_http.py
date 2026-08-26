@@ -24,10 +24,10 @@ for _module in ("fastapi", "httpx"):  # pragma: no cover
 from fastapi.testclient import TestClient
 
 import main
-from mega_empires.models import GameState, PlayerState
-from mega_empires.service import LocalGameService
-from mega_empires.tokens import TokenStore, tokens_path
-from mega_empires.storage import DATA_DIRECTORY_VARIABLE
+from src.core.models import GameState, PlayerState
+from src.service import LocalGameService
+from src.server.tokens import TokenStore, tokens_path
+from src.storage import DATA_DIRECTORY_VARIABLE
 
 TOKEN = "test-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}

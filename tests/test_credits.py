@@ -1,6 +1,6 @@
 import unittest
 
-from mega_empires.credits import (
+from src.core.credits import (
     discount_advances,
     advance_price,
     color_credits,
@@ -8,8 +8,8 @@ from mega_empires.credits import (
     special_credit,
     starting_color_credit,
 )
-from mega_empires.data import ADVANCE_BY_ID
-from mega_empires.models import PlayerState
+from src.core.data import ADVANCE_BY_ID
+from src.core.models import PlayerState
 
 
 class CreditTests(unittest.TestCase):

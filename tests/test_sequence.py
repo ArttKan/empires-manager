@@ -1,7 +1,7 @@
 import unittest
 
-from mega_empires.models import PlayerState
-from mega_empires.sequence import (
+from src.core.models import PlayerState
+from src.core.sequence import (
     PHASES,
     SURPLUS_SUPPORT_ADVANCES,
     adjacent_phase,

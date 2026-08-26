@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .models import GameState, PlayerState
+from .core.models import GameState, PlayerState
 from .storage import save_game
 
 

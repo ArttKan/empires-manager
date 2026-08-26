@@ -23,17 +23,17 @@ for _module in ("fastapi", "uvicorn", "httpx"):  # pragma: no cover
 import uvicorn
 
 import main
-from mega_empires.models import GameState, PlayerState
-from mega_empires.remote import USER_AGENT, RemoteGameService
-from mega_empires.service import (
+from src.core.models import GameState, PlayerState
+from src.client.remote import USER_AGENT, RemoteGameService
+from src.service import (
     LocalGameService,
     RuleViolation,
     ServiceUnavailable,
     UnknownPlayer,
     VersionConflict,
 )
-from mega_empires.storage import DATA_DIRECTORY_VARIABLE
-from mega_empires.tokens import TokenStore, tokens_path
+from src.storage import DATA_DIRECTORY_VARIABLE
+from src.server.tokens import TokenStore, tokens_path
 
 TOKEN = "remote-test-token"
 

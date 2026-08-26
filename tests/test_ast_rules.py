@@ -1,11 +1,11 @@
 import unittest
 
-from mega_empires.ast_rules import (
+from src.core.ast_rules import (
     BASIC_AST_REQUIREMENTS,
     ast_marker_state,
     meets_basic_ast_requirement,
 )
-from mega_empires.models import PlayerState
+from src.core.models import PlayerState
 
 
 class AstRulesTests(unittest.TestCase):

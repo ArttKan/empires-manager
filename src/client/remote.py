@@ -22,8 +22,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .models import GameState, PlayerState
-from .service import (
+from ..core.models import GameState, PlayerState
+from ..service import (
     CommandError,
     CommandResult,
     GameService,

@@ -64,26 +64,63 @@ Do not use syntax or stdlib APIs newer than 3.10. Verify with
 
 ## Architecture
 
-Pure-logic modules have no Tkinter import; all UI lives in `ui.py`. Keep it that
-way — it is what makes the logic testable without a display, and it is what makes
-the backend conversion tractable.
+The package is laid out by layer, and the layering is real: **nothing in `core/`
+imports from `client/` or `server/`.** Pure-logic modules have no Tkinter import;
+all UI lives in `client/ui.py`. Keep it that way — it is what makes the logic
+testable without a display, and it is what makes the backend conversion tractable.
+
+```
+src/
+  core/      the rules — no UI, no network, no persistence
+  service.py, storage.py     the seam — the only mutation and persistence path
+  client/    the desktop app and its connection to the box
+  server/    what only the HTTP layer needs
+main.py, app.py, configure.py, web/, deploy/
+```
+
+`src` is the importable package name, so modules read as `src.core.scoring`. The
+repo root is always on `sys.path` because every entry point lives there.
+
+### core — the rules
 
 | Module | Responsibility |
 |---|---|
-| [mega_empires/data.py](mega_empires/data.py) | Immutable reference data: 18 civilizations, 51 Advances, credits, A.S.T. era boundaries, official scenario setups per player count |
-| [mega_empires/models.py](mega_empires/models.py) | `GameState` / `PlayerState` dataclasses, JSON (de)serialisation, `normalize()` clamping |
-| [mega_empires/scoring.py](mega_empires/scoring.py) | Score breakdown, ranking, tie-breaks, visible rank numbers |
-| [mega_empires/ast_rules.py](mega_empires/ast_rules.py) | Basic A.S.T. era requirements, marker state (READY / BLOCKED / WARNING / FINISHED) |
-| [mega_empires/credits.py](mega_empires/credits.py) | Colour credits, row-chain discounts, effective Advance purchase price |
-| [mega_empires/sequence.py](mega_empires/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
-| [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
-| [mega_empires/config.py](mega_empires/config.py) | Server URL and token from `~/.config/mega-empires/config.json`, env vars overriding per field |
-| [configure.py](configure.py) | Interactive writer for that config file, for handing to players on Windows where the path is unguessable. Uses `config.config_path()` so it cannot drift from what the app reads |
-| [mega_empires/remote.py](mega_empires/remote.py) | `RemoteGameService` — the app in **remote mode**, i.e. a client of the box (the app is never itself a server): the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
-| [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
-| [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
-| [main.py](main.py) | FastAPI HTTP layer over `GameService`. Thin by design: routes, auth, error mapping, SSE fan-out. **No game logic here** |
-| [mega_empires/ui.py](mega_empires/ui.py) | Tkinter app, now a **client of `GameService`**: new-game wizard, tabs (Scoreboard / A.S.T. / Sequence of Play), Advances, Details and calamity dialogs. By far the largest module |
+| [src/core/data.py](src/core/data.py) | Immutable reference data: 18 civilizations, 51 Advances, credits, A.S.T. era boundaries, official scenario setups per player count |
+| [src/core/models.py](src/core/models.py) | `GameState` / `PlayerState` dataclasses, JSON (de)serialisation, `normalize()` clamping |
+| [src/core/scoring.py](src/core/scoring.py) | Score breakdown, ranking, tie-breaks, visible rank numbers |
+| [src/core/ast_rules.py](src/core/ast_rules.py) | Basic A.S.T. era requirements, marker state (READY / BLOCKED / WARNING / FINISHED) |
+| [src/core/credits.py](src/core/credits.py) | Colour credits, row-chain discounts, effective Advance purchase price |
+| [src/core/sequence.py](src/core/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
+| [src/core/calamities.py](src/core/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
+
+### The seam
+
+| Module | Responsibility |
+|---|---|
+| [src/service.py](src/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
+| [src/storage.py](src/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |
+
+### client — the desktop app
+
+| Module | Responsibility |
+|---|---|
+| [src/client/ui.py](src/client/ui.py) | Tkinter app, a **client of `GameService`**: new-game wizard, tabs (Scoreboard / A.S.T. / Sequence of Play / Players), Advances, Details and calamity dialogs. By far the largest module |
+| [src/client/remote.py](src/client/remote.py) | `RemoteGameService` — the app in **remote mode**, i.e. a client of the box (the app is never itself a server): the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
+| [src/client/config.py](src/client/config.py) | Server URL and token from `~/.config/mega-empires/config.json`, env vars overriding per field |
+
+### server
+
+| Module | Responsibility |
+|---|---|
+| [main.py](main.py) | FastAPI HTTP layer over `GameService`. Thin by design: routes, auth, error mapping, SSE fan-out. **No game logic here.** Lives at the root because it is the uvicorn entry point |
+| [src/server/tokens.py](src/server/tokens.py) | `Principal`, `TokenStore`: per-civilization tokens, the join and admin codes, and who may command what |
+
+### Entry points
+
+| Module | Responsibility |
+|---|---|
+| [app.py](app.py) | Starts the desktop app |
+| [configure.py](configure.py) | Interactive writer for the client config file, for handing to players on Windows where the path is unguessable. Uses `config.config_path()` so it cannot drift from what the app reads |
 
 ## Domain rules that are easy to get wrong
 
@@ -276,7 +313,7 @@ a token in the query string the stream is just a "refetch now" signal and client
 pull `/state` with their token. This also makes "every reconnect pulls a fresh
 snapshot" fall out for free. **Do not put game data on that stream.**
 
-Done also: [mega_empires/remote.py](mega_empires/remote.py) and the desktop app's
+Done also: [src/client/remote.py](src/client/remote.py) and the desktop app's
 remote mode. Set `MEGA_EMPIRES_SERVER` (and `MEGA_EMPIRES_TOKEN`) and `ui.py`
 connects to the box instead of opening a local save; unset, it behaves exactly as
 before. `tests/test_remote.py` drives `RemoteGameService` against a **real uvicorn
@@ -345,7 +382,7 @@ served at `/` so the only thing read aloud at the table is the bare domain. One
 page, three states, switching on whether `localStorage` holds a token: code entry,
 seat picker, then the player's own row with a Scoreboard tab.
 
-- **Authorization is per civilization.** [mega_empires/tokens.py](mega_empires/tokens.py)
+- **Authorization is per civilization.** [src/server/tokens.py](src/server/tokens.py)
   mints a token per civilization plus one join code, in a **separate `tokens.json`,
   never in `GameState`** — putting secrets there would copy them into every save,
   the command log directory, and the laptop's mirror. Written `0600`, compared with

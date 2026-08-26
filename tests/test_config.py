@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from mega_empires.config import (
+from src.client.config import (
     CONFIG_PATH_VARIABLE,
     SERVER_VARIABLE,
     TOKEN_VARIABLE,

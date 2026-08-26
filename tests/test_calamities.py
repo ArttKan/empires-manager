@@ -1,6 +1,6 @@
 import unittest
 
-from mega_empires.calamities import MAJOR_CALAMITIES, MINOR_CALAMITIES
+from src.core.calamities import MAJOR_CALAMITIES, MINOR_CALAMITIES
 
 
 class CalamityReferenceTests(unittest.TestCase):

@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from mega_empires.models import GameState, PlayerState
-from mega_empires.storage import (
+from src.core.models import GameState, PlayerState
+from src.storage import (
     archive_existing,
     DATA_DIRECTORY_VARIABLE,
     REPO_SAVE_DIRECTORY,

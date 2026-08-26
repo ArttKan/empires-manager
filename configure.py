@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mega_empires.config import config_path, load_server_config  # noqa: E402
+from src.client.config import config_path, load_server_config  # noqa: E402
 
 
 def _mask(secret: str) -> str:
@@ -55,8 +55,8 @@ def _check(url: str, token: str) -> None:
     Näin väärä token huomataan heti eikä vasta pelipöydässä.
     """
 
-    from mega_empires.remote import RemoteGameService
-    from mega_empires.service import CommandError
+    from src.client.remote import RemoteGameService
+    from src.service import CommandError
 
     service = RemoteGameService(url, token, timeout=8.0)
     try:

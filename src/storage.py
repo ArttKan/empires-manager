@@ -9,7 +9,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import GameState
+from .core.models import GameState
 
 
 # Palvelinasennuksessa tallennukset eivät saa olla lähdekoodihakemistossa, koska

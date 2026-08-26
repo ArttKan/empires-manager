@@ -1,6 +1,6 @@
 """Mega Empires -peliseurannan käynnistystiedosto."""
 
-from mega_empires.ui import run
+from src.client.ui import run
 
 
 if __name__ == "__main__":

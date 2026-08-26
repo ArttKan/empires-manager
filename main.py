@@ -2,7 +2,7 @@
 
 Ohut kerros `GameService`-komentojen päälle. Täällä ei ole pelilogiikkaa: reitit
 kääntävät HTTP:n komennoiksi, tarkistavat tokenin ja lähettävät muutosilmoituksen
-kuunteleville asiakkaille. Säännöt ovat `mega_empires/service.py`:ssä, jotta ne
+kuunteleville asiakkaille. Säännöt ovat `src/service.py`:ssä, jotta ne
 pätevät myös työpöytäsovellukselle.
 
 Reitit:
@@ -39,17 +39,17 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from mega_empires.credits import (
+from src.core.credits import (
     advance_price,
     color_credits,
     discount_advances,
     flexible_credit_entitlement,
 )
-from mega_empires.data import ADVANCES, CIVILIZATION_BY_NAME
-from mega_empires.models import GameState
-from mega_empires.scoring import calculate_score, visible_rankings
-from mega_empires.sequence import PHASE_GATED_COMMANDS
-from mega_empires.service import (
+from src.core.data import ADVANCES, CIVILIZATION_BY_NAME
+from src.core.models import GameState
+from src.core.scoring import calculate_score, visible_rankings
+from src.core.sequence import PHASE_GATED_COMMANDS
+from src.service import (
     CommandError,
     CommandResult,
     LocalGameService,
@@ -57,13 +57,13 @@ from mega_empires.service import (
     UnknownPlayer,
     VersionConflict,
 )
-from mega_empires.storage import (
+from src.storage import (
     archive_existing,
     data_directory,
     default_save_path,
     load_game,
 )
-from mega_empires.tokens import ADMIN, Principal, TokenStore, tokens_path
+from src.server.tokens import ADMIN, Principal, TokenStore, tokens_path
 
 # ECHO_TOKEN on Phase A:n nimi. Uusi nimi on kuvaavampi, mutta vanha kelpaa yhä,
 # jottei palvelimen /etc/mega-empires-backend.env vaadi samanaikaista muutosta.

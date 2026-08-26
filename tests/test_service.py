@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mega_empires.models import GameState, PlayerState
-from mega_empires.service import (
+from src.core.models import GameState, PlayerState
+from src.service import (
     LocalGameService,
     RuleViolation,
     UnknownPlayer,

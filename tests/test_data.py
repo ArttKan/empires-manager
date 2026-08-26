@@ -1,6 +1,6 @@
 import unittest
 
-from mega_empires.data import (
+from src.core.data import (
     ADVANCES,
     ADVANCE_CHAINS,
     AST_MAX_STEP,

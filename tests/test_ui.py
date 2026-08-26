@@ -14,17 +14,17 @@ if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
 
 import tkinter as tk
 
-from mega_empires.models import GameState, PlayerState
-from mega_empires.remote import RemoteGameService
-from mega_empires.service import (
+from src.core.models import GameState, PlayerState
+from src.client.remote import RemoteGameService
+from src.service import (
     LocalGameService,
     ServiceUnavailable,
     VersionConflict,
 )
-from mega_empires.storage import DATA_DIRECTORY_VARIABLE
-from mega_empires.sequence import PHASE_BY_NUMBER
-from mega_empires import ui as ui_module
-from mega_empires.ui import (
+from src.storage import DATA_DIRECTORY_VARIABLE
+from src.core.sequence import PHASE_BY_NUMBER
+from src.client import ui as ui_module
+from src.client.ui import (
     POLL_BACKOFF_MS,
     CALAMITY_DIALOG_SPECS,
     DEFAULT_RULES_VALUES,
@@ -980,7 +980,7 @@ class DestinationBannerTests(unittest.TestCase):
     def test_dialog_preselects_the_requested_save(self) -> None:
         """Peili esivalitaan, mutta muut tallennukset ovat yhä valittavissa."""
 
-        from mega_empires.storage import SavedGame
+        from src.storage import SavedGame
 
         saves = tuple(
             SavedGame(
@@ -1012,7 +1012,7 @@ class DestinationBannerTests(unittest.TestCase):
     def test_dialog_defaults_to_the_first_save_without_preselection(
         self,
     ) -> None:
-        from mega_empires.storage import SavedGame
+        from src.storage import SavedGame
 
         saves = tuple(
             SavedGame(
@@ -1040,7 +1040,7 @@ class DestinationBannerTests(unittest.TestCase):
         nimitörmäystarkistus ei koske sitä lainkaan.
         """
 
-        from mega_empires.storage import save_game, save_path_for_name
+        from src.storage import save_game, save_path_for_name
 
         save_game(
             GameState(
@@ -1072,7 +1072,7 @@ class DestinationBannerTests(unittest.TestCase):
             wizard.destroy()
 
     def test_local_wizard_still_rejects_a_duplicate_name(self) -> None:
-        from mega_empires.storage import save_game, save_path_for_name
+        from src.storage import save_game, save_path_for_name
 
         save_game(
             GameState(

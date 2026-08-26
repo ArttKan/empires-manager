@@ -8,9 +8,9 @@ from tkinter import messagebox, ttk
 from pathlib import Path
 from typing import Callable
 
-from .ast_rules import BASIC_AST_REQUIREMENTS, ast_marker_state
-from .calamities import MAJOR_CALAMITIES, MINOR_CALAMITIES
-from .data import (
+from ..core.ast_rules import BASIC_AST_REQUIREMENTS, ast_marker_state
+from ..core.calamities import MAJOR_CALAMITIES, MINOR_CALAMITIES
+from ..core.data import (
     ADVANCES,
     ADVANCE_BY_ID,
     ADVANCE_GROUPS,
@@ -25,24 +25,24 @@ from .data import (
     default_block,
     scenario_civilizations,
 )
-from .credits import (
+from ..core.credits import (
     advance_price,
     color_credits,
     discount_advances,
     flexible_credit_entitlement,
 )
-from .models import GameState, PlayerState
-from .scoring import calculate_score, players_in_ast_order, visible_rankings
+from ..core.models import GameState, PlayerState
+from ..core.scoring import calculate_score, players_in_ast_order, visible_rankings
 from .config import load_server_config
 from .remote import RemoteGameService
-from .service import (
+from ..service import (
     CommandError,
     LocalGameService,
     RuleViolation,
     ServiceUnavailable,
     VersionConflict,
 )
-from .sequence import (
+from ..core.sequence import (
     PHASES,
     PHASE_BY_NUMBER,
     SPECIAL_ABILITY_ADVANCES,
@@ -51,7 +51,7 @@ from .sequence import (
     adjacent_phase,
     phase_order,
 )
-from .storage import (
+from ..storage import (
     data_directory,
     SavedGame,
     list_saved_games,

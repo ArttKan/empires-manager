@@ -1,7 +1,7 @@
 import unittest
 
-from mega_empires.models import PlayerState
-from mega_empires.scoring import (
+from src.core.models import PlayerState
+from src.core.scoring import (
     calculate_score,
     players_in_ast_order,
     ranked_players,

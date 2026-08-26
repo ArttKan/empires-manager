@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mega_empires.tokens import (
+from src.server.tokens import (
     ADMIN,
     PLAYER,
     PLAYER_COMMANDS,
