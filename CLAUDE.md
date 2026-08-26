@@ -10,10 +10,11 @@ game (The West and/or The East), for **3–18 players**. The laptop is plugged i
 big TV, so every player must see the whole standings on one 1920 × 1080 screen with
 no scrolling.
 
-It is a private tool for one gaming group (usual size 14–16 players). It is never
-published or distributed. Practicality during a live game beats defensive
-validation and general-purpose architecture. The main risk to protect against is
-**entering data for the wrong player**, not malformed input.
+It is a tool for one gaming group (usual size 14–16 players). The source is
+public, but it is built for that group rather than for general use: practicality
+during a live game beats defensive validation and general-purpose architecture.
+The main risk to protect against is **entering data for the wrong player**, not
+malformed input.
 
 This file is the project's documentation. There is no separate spec or user
 manual — what matters is recorded here, in `deploy/README.md` for the server, and
@@ -30,7 +31,8 @@ own data from phones. See "Backend conversion" below.
 | This file | English |
 | All user-visible GUI strings, desktop and PWA | **English** — must match the rulebooks and printed components |
 | Source code comments and docstrings | **Finnish** — match the existing style |
-| `deploy/README.md`, commit messages | **Finnish** |
+| Commit messages | **Finnish** |
+| `deploy/README.md` | **English** — the repo is public and this is the one file a stranger would read |
 
 Domain terms stay in English everywhere (Civilization Advance, Census, A.S.T.,
 Trade Cards Acquisition, Calamity, …) — they are printed on the components.
@@ -39,8 +41,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 223 tests
-python3 -m unittest discover -v             # 148 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 259 tests
+python3 -m unittest discover -v             # 170 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
