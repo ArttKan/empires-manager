@@ -16,9 +16,9 @@ during a live game beats defensive validation and general-purpose architecture.
 The main risk to protect against is **entering data for the wrong player**, not
 malformed input.
 
-This file is the project's documentation. There is no separate spec or user
-manual — what matters is recorded here, in `deploy/README.md` for the server, and
-in the code's Finnish comments.
+This file is the project's documentation. `README.md` is a short public-facing
+note on running the desktop app and `deploy/README.md` covers the server; neither
+is a spec. What matters is recorded here and in the code's Finnish comments.
 
 **In progress:** conversion to a client/server system so players can enter their
 own data from phones. See "Backend conversion" below.
@@ -32,7 +32,7 @@ own data from phones. See "Backend conversion" below.
 | All user-visible GUI strings, desktop and PWA | **English** — must match the rulebooks and printed components |
 | Source code comments and docstrings | **Finnish** — match the existing style |
 | Commit messages | **Finnish** |
-| `deploy/README.md` | **English** — the repo is public and this is the one file a stranger would read |
+| `README.md`, `deploy/README.md` | **English** — the repo is public and these are what a stranger reads |
 
 Domain terms stay in English everywhere (Civilization Advance, Census, A.S.T.,
 Trade Cards Acquisition, Calamity, …) — they are printed on the components.
