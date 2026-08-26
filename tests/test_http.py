@@ -1051,6 +1051,36 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["player"]["advances"], ["pottery"])
 
+    def test_the_catalogue_unlocks_earlier_cards_for_an_elevated_phone(
+        self,
+    ) -> None:
+        """Lukitus on vihje POSTin säännöstä, joten sen on kertova sama asia.
+
+        Muuten lista näyttäisi kortin lukittuna vaikka palvelin ottaisi
+        muutoksen vastaan, ja korjaus näyttäisi mahdottomalta.
+        """
+
+        self._phase(12, round_number=1)
+        self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["mysticism"]},
+            headers=self.elevated,
+        )
+        self._phase(12, round_number=2)
+
+        mine = self.client.get(
+            "/players/Minoa/advances", headers=self.elevated
+        ).json()
+        theirs = self.client.get(
+            "/players/Minoa/advances", headers=self.plain
+        ).json()
+
+        self.assertEqual([a for a in mine["advances"] if a["locked"]], [])
+        # Tavalliselle puhelimelle sama kortti on yhä lukittu.
+        self.assertEqual(
+            {a["id"] for a in theirs["advances"] if a["locked"]}, {"mysticism"}
+        )
+
     def test_elevation_stops_at_the_ast_and_the_turn(self) -> None:
         """Korotus laajentaa rivejä, ei komentoja."""
 

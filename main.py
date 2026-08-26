@@ -401,7 +401,11 @@ async def advance_catalogue(
     # yhtäaikainen, joten saman kierroksen ostot eivät alenna toisiaan silloinkaan
     # kun pelaaja kirjaa ne useassa erässä.
     discounting = discount_advances(player, game.round_number)
-    locked = set(discounting)
+    # Lukitus on käyttöliittymän vihje POSTin säännöstä, joten sen on
+    # noudatettava samaa poikkeusta: kannettava ja korotettu puhelin saavat
+    # purkaa aiempienkin kierrosten kortteja. Muuten lista estäisi sen mitä
+    # palvelin ottaisi vastaan.
+    locked = set() if principal.bypasses_gates else set(discounting)
     totals = color_credits(player, game.player_count, owned=discounting)
     entries = []
     for advance in ADVANCES:

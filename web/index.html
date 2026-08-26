@@ -565,22 +565,32 @@ function render() {
 
   // Vaiheportit tulevat palvelimelta, jottei sääntöä tarvitse toistaa täällä.
   const gates = game.phase_gates || {};
-  const gateOpen = (command) =>
+  const inPhase = (command) =>
     !gates[command] || gates[command].includes(game.current_phase);
+  // Korotettu ohittaa portit palvelimella, joten näkymänkin on avattava ne —
+  // muuten käyttöliittymä estäisi juuri sen mitä palvelin ottaisi vastaan.
+  const gateOpen = (command) => elevated || inPhase(command);
+  // ...mutta kerrotaan silti kun portti on ohitettu: pelinjohtaja ei saa
+  // kirjata Censusta väärässä vaiheessa huomaamattaan.
+  const bypassing = (command) => elevated && !inPhase(command);
   const phaseList = (command) => (gates[command] || []).join(" and ");
 
   const censusOpen = gateOpen("census");
   el("census-box").classList.toggle("locked", !censusOpen);
   census.disabled = !censusOpen;
-  el("census-label").textContent = censusOpen
-    ? "Census — population tokens on the board"
-    : "Census — counted in phase " + phaseList("census") +
-      " (now phase " + game.current_phase + ")";
+  el("census-label").textContent = !censusOpen
+    ? "Census — counted in phase " + phaseList("census") +
+      " (now phase " + game.current_phase + ")"
+    : bypassing("census")
+      ? "Census — outside phase " + phaseList("census") + ", editing as admin"
+      : "Census — population tokens on the board";
 
   // Lista avautuu aina: omien korttien katsominen ei ole muokkaamista, ja
   // pelaajan pitää nähdä mitä hänellä on missä tahansa vaiheessa.
   const canBuy = gateOpen("advances");
-  el("cards-open").textContent = canBuy ? "Buy Advances" : "View Advances";
+  el("cards-open").textContent = !canBuy
+    ? "View Advances"
+    : bypassing("advances") ? "Edit Advances" : "Buy Advances";
   // Kultainen korostus vain kun ostaminen on oikeasti mahdollista; muulloin
   // vaimea, jottei nappi houkuttele vaiheessa jossa siitä ei ole hyötyä.
   el("cards-open").classList.toggle("secondary", !canBuy);
@@ -797,6 +807,9 @@ function renderCredits() {
 }
 
 function advancesEditable() {
+  // Sama poikkeus kuin päänäkymässä: korotettu saa korjata kortit myös
+  // vaiheen ulkopuolella, koska palvelin hyväksyy sen.
+  if (elevated) return true;
   const phases = (game && game.phase_gates && game.phase_gates.advances) || [];
   return !game || phases.length === 0 || phases.includes(game.current_phase);
 }

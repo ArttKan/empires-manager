@@ -41,7 +41,7 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 289 tests
+.venv/bin/python -m unittest discover -v    # all 290 tests
 python3 -m unittest discover -v             # 186 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
@@ -361,6 +361,13 @@ seat picker, then the player's own row with a Scoreboard tab.
   single predicate both exemptions read. It is **not** admin: A.S.T. step, bonus,
   details, turn, new game and the lobby stay on the laptop, because `may_command()`
   still requires `PLAYER_COMMANDS`. Elevation widens the rows, never the commands.
+- **A bypass must reach the client, not just the write path.** `bypasses_gates`
+  was first honoured only by `check_phase()` and the advances POST, so an elevated
+  phone still saw a disabled Census field, a "View Advances" button and locked
+  earlier-turn cards — the server would have accepted every one of those writes.
+  Three places must agree: the command, `GET /players/{civ}/advances` (whose
+  `locked` flag is only a hint about the POST rule), and the page's own gating.
+  When they disagree the permission looks broken rather than merely unused.
 - **The admin code is minted with the join code** and stored in `tokens.json` next
   to it. An unrecognised code is 403 at both join endpoints and counts toward the
   rate limit, as before. **An empty `admin_code` must never match**: a `tokens.json`
