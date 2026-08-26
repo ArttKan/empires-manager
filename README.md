@@ -65,6 +65,13 @@ offers to test the connection so a mistyped token is caught now rather than at
 the table. Run it again to change the settings, or enter `local` as the server to
 remove them.
 
+Values can also be given directly, which is the easiest thing to hand to someone:
+
+```powershell
+python configure.py --server https://your.domain --token THE-TOKEN
+python configure.py --local        # go back to local games
+```
+
 The game then lives on the server and phones can join it. If the server cannot be
 reached, the app offers to continue offline from its local mirror of the last
 state it saw.

@@ -1,5 +1,10 @@
 """Kirjoita palvelinasetukset työpöytäsovellusta varten.
 
+Käyttö:
+    python configure.py                              kysyy arvot
+    python configure.py --server URL --token TOKEN   suoraan, ilman kysymyksiä
+    python configure.py --local                      poistaa asetukset
+
 Tarkoitettu jaettavaksi peliporukalle, erityisesti Windowsissa, jossa
 asetustiedoston polku (`%USERPROFILE%\\.config\\mega-empires\\config.json`) on
 epätavallinen eikä kukaan arvaisi sitä.
@@ -11,7 +16,7 @@ Pythonilla kuin sovelluskin, ilman venviä.
 Aja: python configure.py
 """
 
-import getpass
+import argparse
 import json
 import os
 import sys
@@ -31,11 +36,17 @@ def _mask(secret: str) -> str:
 
 
 def _ask(prompt: str, current: str, secret: bool = False) -> str:
+    """Kysy arvo. Token näkyy kirjoitettaessa.
+
+    Aiemmin käytettiin `getpass`ia, mutta se lukee merkkejä yksitellen
+    `msvcrt`:llä eikä liittäminen toimi PowerShellissä. Tokenin piilottaminen ei
+    ole sen arvoista että arvoa ei saa liitettyä: käyttäjä asettaa sitä omalle
+    koneelleen ja on juuri saanut sen jostain mistä sen näkee muutenkin.
+    """
+
     shown = _mask(current) if secret and current else current
     suffix = f" [{shown}]" if current else ""
-    reader = getpass.getpass if secret else input
-    value = reader(f"{prompt}{suffix}: ").strip()
-    return value or current
+    return input(f"{prompt}{suffix}: ").strip() or current
 
 
 def _check(url: str, token: str) -> None:
@@ -65,9 +76,43 @@ def _check(url: str, token: str) -> None:
           f"turn {game.round_number}.")
 
 
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Write the Mega Empires server settings for the desktop app."
+    )
+    parser.add_argument("--server", help="server address, e.g. https://your.domain")
+    parser.add_argument("--token", help="the server's token")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="remove the settings and play local games",
+    )
+    parser.add_argument(
+        "--no-test",
+        action="store_true",
+        help="skip the connection check",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    options = _arguments()
     path = config_path()
     existing = load_server_config()
+
+    if options.local:
+        if path.is_file():
+            path.unlink()
+            print(f"Removed {path}. The app will open local games.")
+        else:
+            print("Nothing to remove.")
+        return 0
+
+    # Suoraan annetut arvot ohittavat kysymykset, jotta ohjeen voi lähettää
+    # yhtenä valmiina komentona.
+    if options.server and options.token:
+        return _write(path, options.server, options.token, not options.no_test)
+
     print("Mega Empires — server settings\n")
     print(f"  Config file: {path}")
     if existing:
@@ -98,6 +143,13 @@ def main() -> int:
         print("\n  A token is required. Nothing was written.", file=sys.stderr)
         return 1
 
+    test = input("\nTest the connection now? [Y/n]: ").strip().lower() not in {"n", "no"}
+    return _write(path, url, token, test)
+
+
+def _write(path: Path, url: str, token: str, test: bool) -> int:
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"server": url.rstrip("/"), "token": token}, indent=2) + "\n",
@@ -117,7 +169,7 @@ def main() -> int:
         return 1
     print(f"\n  Saved to {path}")
 
-    if input("\nTest the connection now? [Y/n]: ").strip().lower() not in {"n", "no"}:
+    if test:
         _check(url, token)
 
     print("\nDone. Start the app with:  python app.py")
