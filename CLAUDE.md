@@ -41,7 +41,7 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 288 tests
+.venv/bin/python -m unittest discover -v    # all 289 tests
 python3 -m unittest discover -v             # 186 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
@@ -431,6 +431,12 @@ not.
   served HTML and in the parsed DOM, invisible and unfindable in the browser.
   `advances` is equally unsafe; the card UI uses `cards-*` and `.card`. The same
   applies to `ad-`, `ads`, `banner`, `sponsor`, `promo`.
+- **`.hidden` carries `!important`, and must keep it.** It is a utility class, so
+  any `#id` rule that sets `display` beats it on specificity and the element stays
+  visible forever. That is what happened to the elevated phone's `#other` banner
+  (`display: flex`): the class toggled correctly in the DOM and nothing moved. Same
+  symptom as the ad-blocker trap above — present in the DOM, wrong on screen — so
+  suspect CSS specificity second when an element will not hide.
 - **The page sends `Cache-Control: no-store` and embeds a build id** (a hash of
   the served file, also in the `X-Build` header, shown at the foot of the player's
   row). The whole app is one unversioned file, so without both it is impossible to

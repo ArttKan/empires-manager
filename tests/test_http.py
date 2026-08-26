@@ -311,6 +311,17 @@ class PlayerAppTests(HttpTestCase):
         # näyttää täsmälleen tavalliselta.
         self.assertIn('id="other"', text)
 
+    def test_hidden_beats_any_id_rule(self) -> None:
+        """Piilotus on apuluokka; id-sääntö voittaisi sen tarkkuudessa.
+
+        `#other` asettaa `display: flex`, joten ilman `!important`ia nauha jäi
+        pysyvästi näkyviin vaikka luokka vaihtui DOMissa oikein.
+        """
+
+        text = self.client.get("/").text
+
+        self.assertIn(".hidden { display: none !important; }", text)
+
     def test_page_carries_no_token_or_game_data(self) -> None:
         response = self.client.get("/")
 

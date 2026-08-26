@@ -63,7 +63,12 @@
   .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: .95rem; }
   .msg.error { background: #3a1f1f; color: #ffc9c9; }
   .msg.info { background: var(--panel); color: var(--muted); }
-  .hidden { display: none; }
+  /* !important, koska tämä on apuluokka jonka koko tehtävä on piilottaa.
+     Ilman sitä mikä tahansa id-sääntö joka asettaa displayn voittaa
+     tarkkuudessa, ja elementti jää pysyvästi näkyviin — juuri niin kävi
+     #otherille, joka on `display: flex`. Vika on ikävä löytää: luokka vaihtuu
+     DOMissa oikein, mutta mitään ei tapahdu. */
+  .hidden { display: none !important; }
 
   /* ── oma rivi ─────────────────────────────────────────────── */
   /* Väri komponentista. Sitä käytetään reunuksena eikä tekstin värinä, koska
