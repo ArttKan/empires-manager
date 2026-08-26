@@ -78,6 +78,7 @@ the backend conversion tractable.
 | [mega_empires/sequence.py](mega_empires/sequence.py) | The 13 Sequence of Play phases and their computed player orders |
 | [mega_empires/calamities.py](mega_empires/calamities.py) | Minor and Major Calamity reference data for the Sequence of Play view |
 | [mega_empires/config.py](mega_empires/config.py) | Server URL and token from `~/.config/mega-empires/config.json`, env vars overriding per field |
+| [configure.py](configure.py) | Interactive writer for that config file, for handing to players on Windows where the path is unguessable. Uses `config.config_path()` so it cannot drift from what the app reads |
 | [mega_empires/remote.py](mega_empires/remote.py) | `RemoteGameService` — the app in **remote mode**, i.e. a client of the box (the app is never itself a server): the same interface over HTTP. **stdlib `urllib` only** — the desktop app must run without the venv |
 | [mega_empires/service.py](mega_empires/service.py) | `GameService` interface + `LocalGameService`: the only thing allowed to mutate `GameState`. Validated commands, version counters, JSONL command log |
 | [mega_empires/storage.py](mega_empires/storage.py) | Named JSON saves, atomic writes, save listing, data-directory resolution |

@@ -54,6 +54,17 @@ local save. It lives in your home directory:
 }
 ```
 
+You do not have to create it by hand. From the folder you cloned into:
+
+```powershell
+python configure.py        # python3 on Linux / macOS
+```
+
+It asks for the address and the token, writes the file to the right place, and
+offers to test the connection so a mistyped token is caught now rather than at
+the table. Run it again to change the settings, or enter `local` as the server to
+remove them.
+
 The game then lives on the server and phones can join it. If the server cannot be
 reached, the app offers to continue offline from its local mirror of the last
 state it saw.
