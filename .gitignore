@@ -4,3 +4,4 @@ tallennukset/*.json
 tallennukset/*.jsonl
 tallennukset/*.tmp
 .venv/
+empiressecrets.txt
