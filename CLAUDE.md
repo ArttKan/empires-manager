@@ -227,8 +227,10 @@ Tailscale. Game data lives in `/var/lib/mega-empires/` via systemd
 **Phase A and the deploy pipeline are complete and proven.** The box runs a git
 checkout of this repo, and push-to-live has been verified with a real change.
 
-Repo is `git@github.com:ArttKan/mega-empires-manager.git` (an older
-`rautiaik/Mega-Empires` URL is stale). Work happens on `main`; the backend
+Repo is `git@github.com:ArttKan/empires-manager.git`, public and standalone.
+Earlier `ArttKan/mega-empires-manager` and `rautiaik/Mega-Empires` URLs are stale;
+the repo was moved off the fork network so that purged history stays purged, since
+forks share an object store with their parent. Work happens on `main`; the backend
 conversion was developed on `backend-sekoilu` and merged once proven end to end.
 `deploy.sh` defaults to `main` and the server checkout tracks it.
 
