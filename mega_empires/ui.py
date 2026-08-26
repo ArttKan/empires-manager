@@ -4255,8 +4255,15 @@ class MegaEmpiresApp:
 
         signature = (
             status.get("join_code"),
+            status.get("admin_code"),
+            getattr(self, "_show_admin_code", False),
             tuple(
-                (p["civilization"], p.get("nickname", ""), p["claimed"])
+                (
+                    p["civilization"],
+                    p.get("nickname", ""),
+                    p["claimed"],
+                    p.get("elevated", False),
+                )
                 for p in status.get("players", [])
             ),
         )
@@ -4316,7 +4323,34 @@ class MegaEmpiresApp:
             font=("Segoe UI Semibold", 54),
             background=PANEL,
             foreground=ACCENT,
-        ).pack(pady=(0, 18))
+        ).pack(pady=(0, 10))
+
+        # Admin-koodi ei ole pöydälle luettava vaan yhdelle tai kahdelle
+        # annettava. Televisiossa jatkuvasti näkyvänä sen saisi jokainen, joten
+        # se paljastetaan vain pyydettäessä ja pienellä.
+        admin_row = tk.Frame(banner, background=PANEL)
+        admin_row.pack(pady=(0, 16))
+        shown = getattr(self, "_show_admin_code", False)
+        tk.Label(
+            admin_row,
+            text="Admin code",
+            font=("Segoe UI", 11),
+            background=PANEL,
+            foreground=MUTED,
+        ).pack(side="left", padx=(0, 8))
+        tk.Label(
+            admin_row,
+            text=(status.get("admin_code") or "—") if shown else "•••••",
+            font=("Segoe UI Semibold", 15),
+            background=PANEL,
+            foreground=TEXT if shown else MUTED,
+        ).pack(side="left", padx=(0, 10))
+        ttk.Button(
+            admin_row,
+            text="Hide" if shown else "Show",
+            width=6,
+            command=self._toggle_admin_code,
+        ).pack(side="left")
 
         players = status.get("players", [])
         joined = sum(1 for p in players if p["claimed"])
@@ -4389,6 +4423,17 @@ class MegaEmpiresApp:
                 background=PANEL,
                 foreground="#4caf6d",
             ).pack(side="right", padx=6)
+            # Kuka pystyy kirjoittamaan muidenkin riveille. Pelinjohtajan on
+            # tiedettävä se ilman että hänen tarvitsee muistaa kenelle antoi
+            # koodin.
+            if player.get("elevated"):
+                tk.Label(
+                    outer,
+                    text="edits all rows",
+                    font=("Segoe UI Semibold", 11),
+                    background=PANEL,
+                    foreground=ACCENT,
+                ).pack(side="right", padx=6)
         else:
             tk.Label(
                 outer,
@@ -4397,6 +4442,11 @@ class MegaEmpiresApp:
                 background=PANEL,
                 foreground=MUTED,
             ).pack(side="right", padx=14)
+
+    def _toggle_admin_code(self) -> None:
+        self._show_admin_code = not getattr(self, "_show_admin_code", False)
+        self._lobby_signature = None
+        self._refresh_lobby()
 
     def _release_seat(self, civilization: str) -> None:
         """Vapauta paikka, jotta pelaaja voi liittyä uudelleen.
@@ -4410,8 +4460,9 @@ class MegaEmpiresApp:
             return
         if not messagebox.askyesno(
             "Release this seat?",
-            f"{civilization} can then be claimed again with the game code. "
-            "The phone currently using it will be signed out.",
+            f"{civilization} can then be claimed again with the game code, "
+            "and any permission to edit other rows is cancelled. The phone "
+            "that had the seat keeps its own row until someone reclaims it.",
             icon="warning",
             parent=self.root,
         ):

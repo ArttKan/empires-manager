@@ -63,7 +63,7 @@ from mega_empires.storage import (
     default_save_path,
     load_game,
 )
-from mega_empires.tokens import Principal, TokenStore, tokens_path
+from mega_empires.tokens import ADMIN, Principal, TokenStore, tokens_path
 
 # ECHO_TOKEN on Phase A:n nimi. Uusi nimi on kuvaavampi, mutta vanha kelpaa yhä,
 # jottei palvelimen /etc/mega-empires-backend.env vaadi samanaikaista muutosta.
@@ -197,12 +197,13 @@ PHASE_LABELS = {
 def check_phase(principal: Principal, command: str) -> None:
     """Estä puhelimelta komennot väärässä vaiheessa.
 
-    Kannettava ohittaa portin: pelinjohtajan on voitava korjata virhe milloin
-    tahansa ilman että peliä siirretään vaiheissa taaksepäin.
+    Kannettava ja korotettu puhelin ohittavat portin: pelinjohtajan on voitava
+    korjata virhe milloin tahansa ilman että peliä siirretään vaiheissa
+    taaksepäin.
     """
 
     allowed = PHASE_GATED_COMMANDS.get(command)
-    if allowed is None or principal.is_admin:
+    if allowed is None or principal.bypasses_gates:
         return
     phase = get_service().snapshot().current_phase
     if phase not in allowed:
@@ -362,6 +363,14 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
         command: sorted(phases)
         for command, phases in PHASE_GATED_COMMANDS.items()
     }
+    # Kuka kysyi. Puhelin ei voi päätellä korotustaan mistään muualta, eikä
+    # sitä saa säilöä pelkkään localStorageen: vapautus ei silloin purkaisi
+    # käyttöliittymää, vaikka palvelin kieltäytyisikin kirjoituksista.
+    data["you"] = {
+        "civilization": principal.civilization,
+        "elevated": principal.elevated,
+        "admin": principal.is_admin,
+    }
     return data
 
 
@@ -494,7 +503,7 @@ async def set_advances(
     authorize(principal, civilization, "advances")
     check_phase(principal, "advances")
     service = get_service()
-    if not principal.is_admin:
+    if not principal.bypasses_gates:
         game = service.snapshot()
         player = next(
             (p for p in game.players if p.civilization == civilization), None
@@ -622,6 +631,8 @@ async def create_game(
 
 
 class JoinBody(BaseModel):
+    # Yksi kenttä, kaksi kelpaavaa koodia: peli- tai admin-koodi. Jälkimmäinen
+    # varaa paikan samalla tavalla ja merkitsee sen lisäksi korotetuksi.
     code: str
     civilization: str = ""
 
@@ -691,11 +702,15 @@ async def join_roster(body: JoinBody, request: Request) -> dict:
 
     _check_join_rate(request)
     store = get_token_store()
-    if body.code.strip().upper() != store.join_code:
+    kind = store.code_kind(body.code)
+    if not kind:
         _record_join_failure(request)
         raise HTTPException(status_code=403, detail="Wrong join code.")
     nicknames = _nicknames()
     return {
+        # Kerrotaan jo tässä kumman koodin liittyjä antoi, jotta hän näkee sen
+        # ennen paikan varaamista eikä vasta jälkeenpäin.
+        "elevated": kind == ADMIN,
         "players": [
             {
                 "civilization": name,
@@ -728,7 +743,11 @@ async def join(body: JoinBody, request: Request) -> dict:
         # Väärä koodi ja varattu paikka on erotettava toisistaan: jälkimmäinen
         # on tavallinen tilanne pöydässä, ei tunkeutumisyritys.
         raise HTTPException(status_code=409, detail=message)
-    return {"token": token, "civilization": body.civilization}
+    return {
+        "token": token,
+        "civilization": body.civilization,
+        "elevated": store.is_elevated(body.civilization),
+    }
 
 
 @app.get("/admin/join")
@@ -740,11 +759,13 @@ async def admin_join(principal: Principal = Depends(get_principal)) -> dict:
     nicknames = _nicknames()
     return {
         "join_code": store.join_code,
+        "admin_code": store.admin_code,
         "players": [
             {
                 "civilization": name,
                 "claimed": claimed,
                 "nickname": nicknames.get(name, ""),
+                "elevated": store.is_elevated(name),
             }
             for name, claimed in store.status()
         ],

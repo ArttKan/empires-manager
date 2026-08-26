@@ -1151,9 +1151,20 @@ class LobbyTests(unittest.TestCase):
         )
         self.status = {
             "join_code": "AB7QX",
+            "admin_code": "K9MRT",
             "players": [
-                {"civilization": "Minoa", "nickname": "Salla", "claimed": False},
-                {"civilization": "Hellas", "nickname": "Matti", "claimed": True},
+                {
+                    "civilization": "Minoa",
+                    "nickname": "Salla",
+                    "claimed": False,
+                    "elevated": False,
+                },
+                {
+                    "civilization": "Hellas",
+                    "nickname": "Matti",
+                    "claimed": True,
+                    "elevated": False,
+                },
             ],
         }
         self.app = object.__new__(MegaEmpiresApp)
@@ -1193,6 +1204,48 @@ class LobbyTests(unittest.TestCase):
         self.assertIn("Minoa (Salla)", shown)
         self.assertIn("Hellas (Matti)", shown)
         self.assertIn("1 of 2 players have joined", shown)
+
+    def test_admin_code_is_not_on_the_television_by_default(self) -> None:
+        """Aula on koko pelin ajan näkyvissä; paljas koodi olisi kaikkien."""
+
+        service = self._Stub(self.status)
+        self._build(service)
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        shown = self._labels(self.app.lobby_tab)
+        self.assertNotIn("K9MRT", shown)
+        self.assertIn("•••••", shown)
+
+        self.app._toggle_admin_code()
+        self.root.update_idletasks()
+
+        self.assertIn("K9MRT", self._labels(self.app.lobby_tab))
+
+    def test_lobby_marks_who_can_edit_every_row(self) -> None:
+        """Pelinjohtajan ei pidä joutua muistamaan kenelle antoi koodin."""
+
+        self.status["players"][1]["elevated"] = True
+        self._build(self._Stub(self.status))
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        self.assertIn("edits all rows", self._labels(self.app.lobby_tab))
+
+    def test_lobby_redraws_when_an_elevation_appears(self) -> None:
+        """Allekirjoituksen on lueteltava kaikki mitä paneeli piirtää."""
+
+        service = self._Stub(self.status)
+        self._build(service)
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+        self.assertNotIn("edits all rows", self._labels(self.app.lobby_tab))
+
+        self.status["players"][1]["elevated"] = True
+        self.app._refresh_lobby()
+        self.root.update_idletasks()
+
+        self.assertIn("edits all rows", self._labels(self.app.lobby_tab))
 
     def test_unchanged_status_is_not_redrawn(self) -> None:
         """Kysely käy parin sekunnin välein; joka kerta piirtäminen välkkyisi."""

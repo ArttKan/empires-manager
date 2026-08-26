@@ -41,8 +41,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 261 tests
-python3 -m unittest discover -v             # 172 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 288 tests
+python3 -m unittest discover -v             # 186 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
@@ -350,6 +350,42 @@ seat picker, then the player's own row with a Scoreboard tab.
   never in `GameState`** — putting secrets there would copy them into every save,
   the command log directory, and the laptop's mirror. Written `0600`, compared with
   `secrets.compare_digest`.
+- **There is one code field and two codes that open it.** The join code claims a
+  seat as a player; the admin code claims a seat *and* elevates it. Nobody at the
+  table has to be told which box a code goes in — `TokenStore.code_kind()` decides
+  from the code itself, and `/join/roster` reports back which one was recognised so
+  the phone can say so before a seat is picked. An *elevated* phone claims a seat
+  normally, but may then change cities, census and advances on **any** row,
+  and it bypasses the phase gates and the earlier-turn Advance lock exactly as the
+  laptop does. `Principal.elevated` carries it; `Principal.bypasses_gates` is the
+  single predicate both exemptions read. It is **not** admin: A.S.T. step, bonus,
+  details, turn, new game and the lobby stay on the laptop, because `may_command()`
+  still requires `PLAYER_COMMANDS`. Elevation widens the rows, never the commands.
+- **The admin code is minted with the join code** and stored in `tokens.json` next
+  to it. An unrecognised code is 403 at both join endpoints and counts toward the
+  rate limit, as before. **An empty `admin_code` must never match**: a `tokens.json`
+  written before this feature has none, and `code_kind()` guards on that explicitly
+  — without the guard every join on a not-yet-restarted server would be elevated.
+  Such a store simply cannot elevate until the next `POST /game` mints both codes.
+- **The lobby hides the admin code behind a Show button.** The Players tab is on
+  the TV for the whole game; a second code rendered at reading size would elevate
+  everyone who looked up. The join code stays large, the admin code does not.
+- **Elevation is read from `/state`, never from `localStorage`.** `you.elevated`
+  arrives with every refresh, so a released seat loses the other-row UI on the next
+  poll instead of showing controls the server will refuse.
+- **Releasing a seat is the only way to revoke elevation**, and it clears the flag.
+  Note that release frees the seat but does **not** invalidate the token — a
+  released phone keeps working on its own row until someone reclaims it. That
+  predates this feature; the release dialog now says what actually happens.
+- **Every phone command names its civilization explicitly.** `command(route,
+  payload, civilization)` looks `expected_version` up from that row, and the
+  debounced cities and census senders capture the row at *schedule* time. Reading
+  the row at fire time instead would send a tap made on one player to whoever the
+  elevated user had switched to during the debounce — the wrong-player error this
+  whole program is built to prevent, arriving through its own convenience feature.
+- **An elevated phone showing someone else's row says so loudly** (`#other`),
+  and the scoreboard is the row switcher: tapping a row opens it. Colour is not the
+  only signal — the banner names the civilization in text.
 - **Phones may change cities, census and advances on their own row only.** A.S.T.
   step, bonus, details, turn and new game are admin-only. 401 means "unknown
   token", 403 means "known but not allowed" — the phone needs to tell those apart.

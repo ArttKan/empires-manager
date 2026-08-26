@@ -113,6 +113,23 @@
     background: var(--panel-alt); color: var(--muted);
   }
   .bar.warn { background: #4a3a1c; color: #ffe0a3; }
+  /* Toisen rivin muokkaus on tämän ohjelman pahin virhelähde, joten se
+     erottuu kaikkein voimakkaimmin: koko rivi vaihtaa väriä eikä vain
+     otsikkoteksti. */
+  #other {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 12px; padding: 12px 14px; border-radius: 10px;
+    background: #5a2d12; color: #ffd8bd; font-size: .95rem; font-weight: 600;
+  }
+  #other button { width: auto; margin: 0; padding: 8px 14px; font-size: .85rem; }
+  /* Kumpi koodi kelpasi. Ilman tätä sen näkisi vasta paikan varattuaan. */
+  #seat-role {
+    margin-bottom: 14px; padding: 10px 12px; border-radius: 8px;
+    background: #5a2d12; color: #ffd8bd; font-size: .9rem; font-weight: 600;
+  }
+  .tabs button.elsewhere { color: #ffb98a; }
+  .standings .row.pick { cursor: pointer; }
+  .standings .row.pick:active { background: var(--panel-alt); }
   .bar.bad { background: #3a1f1f; color: #ffc9c9; }
 
   /* ── Civilization Advances ────────────────────────────────── */
@@ -208,6 +225,7 @@
   <!-- ── paikan valinta ───────────────────────────────────────── -->
   <section id="join-seat" class="hidden">
     <h1>Pick your civilization</h1>
+    <div id="seat-role" class="hidden"></div>
     <div id="seats"></div>
     <button id="seat-back" class="secondary">Back</button>
     <div id="seat-msg" class="msg hidden"></div>
@@ -216,6 +234,11 @@
   <!-- ── pelinäkymä (tulossa) ─────────────────────────────────── -->
   <section id="play" class="hidden">
     <div class="bar" id="bar">Connecting…</div>
+
+    <div id="other" class="hidden">
+      <span id="other-text"></span>
+      <button id="other-back" class="secondary">My row</button>
+    </div>
 
     <div class="me">
       <div class="civ" id="play-civ">—</div>
@@ -365,6 +388,13 @@ async function submitCode() {
   }
   message("code-msg", "", "info");
   joinCode = code;
+  // Palvelin kertoo kumman koodin se tunnisti; kenttiä on vain yksi.
+  const role = el("seat-role");
+  role.classList.toggle("hidden", !body.elevated);
+  if (body.elevated) {
+    role.textContent =
+      "Admin code accepted — you will be able to edit every player's row.";
+  }
   renderSeats(body.players);
   show("join-seat");
 }
@@ -411,6 +441,7 @@ async function claim(civilization) {
     return;
   }
   session.write({ token: body.token, civilization: body.civilization });
+  elevated = !!body.elevated;
   message("seat-msg", "", "info");
   enterGame();
 }
@@ -424,7 +455,11 @@ const CITIES_DEBOUNCE_MS = 500;
 const MAX_CITIES = 9;
 const POLL_FALLBACK_MS = 15000;
 
-let me = null;          // oma rivi viimeisimmästä tilannekuvasta
+let me = null;          // näytettävä rivi viimeisimmästä tilannekuvasta
+// Korotettu puhelin katsoo ja muokkaa muitakin rivejä, joten "kenen rivi on
+// näkyvissä" on eri asia kuin "minkä paikan varasin".
+let viewing = null;
+let elevated = false;
 let game = null;        // koko tilannekuva
 let censusTimer = null;
 let citiesTimer = null;
@@ -459,7 +494,17 @@ async function refresh() {
     return;
   }
   game = body;
-  me = body.players.find((p) => p.civilization === saved.civilization) || null;
+  // Korotus luetaan aina palvelimelta. localStorageen jäänyt vanha tieto
+  // näyttäisi muokkausnapit vielä senkin jälkeen kun paikka on vapautettu.
+  elevated = !!(body.you && body.you.elevated);
+  if (!viewing) viewing = saved.civilization;
+  if (!elevated && viewing !== saved.civilization) setViewing(saved.civilization);
+  me = body.players.find((p) => p.civilization === viewing) || null;
+  if (!me && viewing !== saved.civilization) {
+    // Katsottu rivi katosi — palaa omalle sen sijaan että jäätäisiin tyhjään.
+    setViewing(saved.civilization);
+    me = body.players.find((p) => p.civilization === viewing) || null;
+  }
   if (!me) {
     bar(saved.civilization + " is not in this game", "bad");
     return;
@@ -468,13 +513,34 @@ async function refresh() {
   render();
 }
 
+function setViewing(civilization) {
+  if (viewing === civilization) return;
+  viewing = civilization;
+  // Kesken oleva näppäily on jo kiinnitetty omaan riviinsä (ks. changeCities
+  // ja scheduleCensus), joten ajastimia ei tarvitse perua — ne osuvat oikein.
+  // Näytetty arvo sen sijaan kuuluu edelliselle riville.
+  citiesPending = null;
+  el("census").blur();
+  message("play-msg", "", "info");
+}
+
 function render() {
   el("play-civ").textContent = me.civilization;
+  // Väärän pelaajan riville kirjoittaminen on tämän ohjelman pahin virhe, ja
+  // korotettu puhelin tekee siitä mahdollista — nauha on siksi näkyvä ja
+  // pysyy näkyvissä koko ajan, ei vain vaihdon hetkellä.
+  const own = (session.read() || {}).civilization;
+  const elsewhere = elevated && me.civilization !== own;
+  el("other").classList.toggle("hidden", !elsewhere);
+  if (elsewhere) {
+    el("other-text").textContent = "Editing " + me.civilization + " — not your row";
+  }
   document.querySelector("#play .me").style.borderLeftColor = me.color;
   el("play-who").textContent = me.nickname
     ? me.nickname + " · " + me.block
     : me.block;
   el("tab-me").textContent = me.civilization;
+  el("tab-me").classList.toggle("elsewhere", elsewhere);
   el("play-rank").textContent = me.rank + ".";
   el("play-total").textContent = me.score.total;
   // "7 advances" luki aiemmin pisteitä, ei kortteja. Erittely kertoo nyt
@@ -535,7 +601,22 @@ function renderBoard() {
   for (const player of ordered) {
     const row = document.createElement("div");
     row.className =
-      "row" + (me && player.civilization === me.civilization ? " self" : "");
+      "row" + (me && player.civilization === me.civilization ? " self" : "") +
+      (elevated ? " pick" : "");
+    if (elevated) {
+      // Napautettava pistetaulu on luontevin valitsin: pelinjohtaja näkee
+      // rivin jota on auttamassa ja koskettaa juuri sitä. Erillinen
+      // pudotusvalikko vaatisi nimen tunnistamisen listasta uudestaan.
+      row.onclick = () => {
+        setViewing(player.civilization);
+        // Rivi on jo tässä tilannekuvassa, joten piirretään heti eikä jäädä
+        // odottamaan verkkoa — muuten edellisen rivin luvut vilahtaisivat.
+        me = player;
+        render();
+        show("play");
+        refresh();
+      };
+    }
     row.innerHTML =
       `<span class="rank">${player.rank}.</span>` +
       `<span class="nm">` +
@@ -549,17 +630,21 @@ function renderBoard() {
   }
 }
 
-async function command(route, payload) {
-  if (!me) return;
-  const saved = session.read();
+async function command(route, payload, civilization) {
+  // Rivi kiinnitetään kutsussa eikä lueta `me`:stä: viivästetty komento kuuluu
+  // sille riville jota napautettiin, ei sille joka sattuu olemaan näkyvissä
+  // kun viive umpeutuu.
+  const civ = civilization || viewing;
+  const row = game ? game.players.find((p) => p.civilization === civ) : null;
+  if (!row) return;
   const { ok, status, body } = await api(
-    "/players/" + encodeURIComponent(saved.civilization) + "/" + route,
+    "/players/" + encodeURIComponent(civ) + "/" + route,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       // expected_version estää sen, että hidas napautus yliajaisi
       // kannettavalta juuri tehdyn korjauksen.
-      body: JSON.stringify({ ...payload, expected_version: me.version, actor: "phone" }),
+      body: JSON.stringify({ ...payload, expected_version: row.version, actor: "phone" }),
     }
   );
   if (ok) {
@@ -597,25 +682,32 @@ function changeCities(delta) {
   if (target === citiesShown()) return;
   citiesPending = target;
   renderCities();                       // välitön palaute napautukseen
+  const civilization = viewing;
+  const before = me.cities;
   if (citiesTimer !== null) clearTimeout(citiesTimer);
   citiesTimer = setTimeout(() => {
     citiesTimer = null;
     const value = citiesPending;
     citiesPending = null;
-    if (!me || value === me.cities) { renderCities(); return; }
-    command("cities", { value });
+    if (value === null || value === before) { renderCities(); return; }
+    command("cities", { value }, civilization);
   }, CITIES_DEBOUNCE_MS);
 }
 
 function scheduleCensus() {
+  // Rivi ja teksti luetaan jo tässä. Jokainen näppäinpainallus ajastaa
+  // uudelleen, joten viimeisin teksti voittaa — ja arvo pysyy sidottuna siihen
+  // riviin jolle se kirjoitettiin, vaikka näkymä ehtisi vaihtua.
+  const civilization = viewing;
+  const raw = el("census").value.trim();
+  const before = me ? me.census : null;
   if (censusTimer !== null) clearTimeout(censusTimer);
   censusTimer = setTimeout(() => {
     censusTimer = null;
-    const raw = el("census").value.trim();
     if (raw === "") return;
     const value = Math.max(0, Math.min(55, parseInt(raw, 10) || 0));
-    if (me && value === me.census) return;
-    command("census", { value });
+    if (value === before) return;
+    command("census", { value }, civilization);
   }, CENSUS_DEBOUNCE_MS);
 }
 
@@ -638,6 +730,7 @@ function listen() {
 function enterGame() {
   const saved = session.read();
   if (!saved) { show("join-code"); return; }
+  viewing = saved.civilization;
   el("play-civ").textContent = saved.civilization;
   el("tab-me").textContent = saved.civilization;
   show("play");
@@ -662,10 +755,9 @@ let ordered = [];   // näyttöjärjestys: omistetut ensin, lukittu avaushetkell
 let selection = null;   // muokattava valinta; tallennetaan vasta Savella
 
 async function openAdvances() {
-  const saved = session.read();
   message("cards-msg", "", "info");
   const { ok, body } = await api(
-    "/players/" + encodeURIComponent(saved.civilization) + "/advances",
+    "/players/" + encodeURIComponent(viewing) + "/advances",
     { headers: authHeaders() }
   );
   if (!ok) {
@@ -769,9 +861,8 @@ function renderAdvances() {
 async function saveAdvances() {
   el("cards-save").disabled = true;
   message("cards-msg", "Saving…", "info");
-  const saved = session.read();
   const { ok, status } = await api(
-    "/players/" + encodeURIComponent(saved.civilization) + "/advances",
+    "/players/" + encodeURIComponent(viewing) + "/advances",
     {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -863,6 +954,17 @@ scroller.addEventListener("touchend", async () => {
 });
 
 el("tab-me").onclick = () => show("play");
+el("other-back").onclick = () => {
+  const saved = session.read();
+  if (!saved) return;
+  setViewing(saved.civilization);
+  const own = game
+    ? game.players.find((p) => p.civilization === saved.civilization)
+    : null;
+  if (own) { me = own; render(); }
+  show("play");
+  refresh();
+};
 el("tab-board").onclick = () => { renderBoard(); show("board"); };
 
 el("cards-open").onclick = openAdvances;

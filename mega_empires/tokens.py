@@ -11,6 +11,11 @@ Oikeusmalli on tahallaan karkea, koska peliporukka on pieni ja tuttu:
 * **player** — puhelin. Saa muuttaa vain oman sivilisaationsa kaupunkeja,
   Censusta ja Advance-kortteja. A.S.T.-askel, bonus, kierros ja uusi peli ovat
   vain adminille.
+* **elevated player** — puhelin, joka liittyi myös admin-koodilla. Varaa oman
+  paikkansa tavalliseen tapaan, mutta saa muuttaa noita samoja kolmea kenttää
+  kenen tahansa riviltä, ja ohittaa vaiheportit kuten kannettava. A.S.T. ja
+  kierros pysyvät silti kannettavalla: korotus on pelinjohtajan apuväline
+  naapurin rivin korjaamiseen, ei toinen täysi admin.
 
 Vain vakiokirjastoa.
 """
@@ -42,18 +47,32 @@ PLAYER_COMMANDS = frozenset({"cities", "census", "advances"})
 class Principal:
     kind: str
     civilization: str = ""
+    # Korotettu pelaaja: oma paikka varattuna, mutta kirjoitusoikeus kaikkien
+    # riveille. Ei tee tästä adminia — `is_admin` ratkaisee yhä A.S.T.:n,
+    # kierroksen, uuden pelin ja aulan.
+    elevated: bool = False
 
     @property
     def is_admin(self) -> bool:
         return self.kind == ADMIN
 
+    @property
+    def bypasses_gates(self) -> bool:
+        """Saako vaiheportit ja korttien pysyvyyden ohittaa.
+
+        Korotettu puhelin saa, koska korotuksen koko tarkoitus on korjata
+        toisen rivi silloin kun se on väärin — ja väärin se huomataan yleensä
+        vasta kun vaihe on jo vaihtunut.
+        """
+
+        return self.is_admin or self.elevated
+
     def may_command(self, civilization: str, command: str) -> bool:
         if self.is_admin:
             return True
-        return (
-            civilization == self.civilization
-            and command in PLAYER_COMMANDS
-        )
+        if command not in PLAYER_COMMANDS:
+            return False
+        return self.elevated or civilization == self.civilization
 
 
 def tokens_path(directory: Path) -> Path:
@@ -69,16 +88,28 @@ class TokenStore:
 
     # -- luonti ja lataus ---------------------------------------------------
 
+    @staticmethod
+    def _code() -> str:
+        return "".join(
+            secrets.choice(_JOIN_ALPHABET) for _ in range(JOIN_CODE_LENGTH)
+        )
+
     @classmethod
     def create(cls, civilizations, path: Path) -> "TokenStore":
+        join_code = cls._code()
+        admin_code = cls._code()
+        # Kahden saman koodin osuminen on epätodennäköistä mutta ei mahdotonta,
+        # ja silloin jokainen liittyjä olisi vahingossa korotettu.
+        while admin_code == join_code:
+            admin_code = cls._code()
         data = {
-            "join_code": "".join(
-                secrets.choice(_JOIN_ALPHABET) for _ in range(JOIN_CODE_LENGTH)
-            ),
+            "join_code": join_code,
+            "admin_code": admin_code,
             "players": {
                 name: {
                     "token": secrets.token_urlsafe(TOKEN_BYTES),
                     "claimed_at": None,
+                    "elevated": False,
                 }
                 for name in civilizations
             },
@@ -117,6 +148,31 @@ class TokenStore:
     def civilizations(self) -> tuple:
         return tuple(self._data.get("players", {}))
 
+    @property
+    def admin_code(self) -> str:
+        return str(self._data.get("admin_code", ""))
+
+    def code_kind(self, code: str) -> str:
+        """Kumpi koodi annettiin: ADMIN, PLAYER, vai "" jos kumpikaan.
+
+        Koodeja on kaksi mutta kenttä yksi: pöydässä sanotaan yksi merkkijono
+        eikä selitetä mihin kahdesta kentästä se kuuluu. Korotus seuraa siitä
+        kumman koodin liittyjä tiesi.
+        """
+
+        wanted = code.strip().upper()
+        if not wanted:
+            return ""
+        if self.join_code and secrets.compare_digest(wanted, self.join_code):
+            return PLAYER
+        if self.admin_code and secrets.compare_digest(wanted, self.admin_code):
+            return ADMIN
+        return ""
+
+    def is_elevated(self, civilization: str) -> bool:
+        entry = self._data.get("players", {}).get(civilization)
+        return bool(entry and entry.get("elevated"))
+
     def is_claimed(self, civilization: str) -> bool:
         entry = self._data.get("players", {}).get(civilization)
         return bool(entry and entry.get("claimed_at"))
@@ -142,7 +198,9 @@ class TokenStore:
         for name, entry in self._data.get("players", {}).items():
             stored = str(entry.get("token", ""))
             if stored and secrets.compare_digest(token, stored):
-                return Principal(PLAYER, name)
+                return Principal(
+                    PLAYER, name, elevated=bool(entry.get("elevated"))
+                )
         return None
 
     # -- liittyminen ---------------------------------------------------------
@@ -153,11 +211,13 @@ class TokenStore:
         Nostaa ValueErrorin jos koodi on väärä, sivilisaatiota ei ole tai se on
         jo varattu. Kertaalleen varattua ei voi napata toiselta ilman adminin
         vapautusta — se estää sen että kaksi pelaajaa päätyy samaan riviin.
+
+        Kelpaa kumpi tahansa kahdesta koodista. Admin-koodilla varattu paikka
+        merkitään korotetuksi; liittyminen itsessään menee samaa reittiä.
         """
 
-        if not self.join_code or not secrets.compare_digest(
-            join_code.strip().upper(), self.join_code
-        ):
+        kind = self.code_kind(join_code)
+        if not kind:
             raise ValueError("Wrong join code.")
         entry = self._data.get("players", {}).get(civilization)
         if entry is None:
@@ -165,6 +225,7 @@ class TokenStore:
         if entry.get("claimed_at"):
             raise ValueError(f"{civilization} has already been claimed.")
         entry["claimed_at"] = when
+        entry["elevated"] = kind == ADMIN
         self.save()
         return str(entry["token"])
 
@@ -175,4 +236,7 @@ class TokenStore:
         if entry is None:
             raise ValueError(f"{civilization} is not in this game.")
         entry["claimed_at"] = None
+        # Vapautus on myös ainoa tapa perua korotus: paikka palaa täysin
+        # tyhjäksi, ja seuraava liittyjä saa vain sen mitä koodillaan ansaitsee.
+        entry["elevated"] = False
         self.save()

@@ -284,6 +284,33 @@ class PlayerAppTests(HttpTestCase):
 
         self.assertIn("no-store", response.headers.get("cache-control", ""))
 
+    def test_page_avoids_ad_blocker_prefixes(self) -> None:
+        """Geneeriset mainossäännöt piilottavat nämä alkuiset id:t ja luokat.
+
+        Elementit ovat silloin palvellussa HTML:ssä ja jäsennetyssä DOMissa,
+        mutta näkymättömiä puhelimessa eivätkä löydy edes selaimen haulla —
+        vika näyttää siltä kuin koodia ei olisi lainkaan.
+        """
+
+        text = self.client.get("/").text
+
+        for prefix in ("adv", "ad-", "ads", "banner", "sponsor", "promo"):
+            for attribute in ("id", "class"):
+                self.assertNotIn(f'{attribute}="{prefix}', text, prefix)
+
+    def test_page_has_one_code_field_and_the_wrong_row_banner(self) -> None:
+        """Koodikenttiä on yksi; kumpi koodi annettiin, ratkeaa palvelimella."""
+
+        text = self.client.get("/").text
+
+        self.assertIn('id="code"', text)
+        self.assertNotIn('id="code-admin"', text)
+        # Kertoo kumpi koodi kelpasi, ennen paikan varaamista.
+        self.assertIn('id="seat-role"', text)
+        # Kertoo että näkyvissä on toisen rivi. Ilman sitä korotettu puhelin
+        # näyttää täsmälleen tavalliselta.
+        self.assertIn('id="other"', text)
+
     def test_page_carries_no_token_or_game_data(self) -> None:
         response = self.client.get("/")
 
@@ -892,6 +919,192 @@ class JoinFlowTests(HttpTestCase):
                 "/join/roster", json={"code": self.code}
             )
             self.assertEqual(response.status_code, 200)
+
+
+class ElevatedPhoneTests(HttpTestCase):
+    """Admin-koodilla liittynyt puhelin korjaa kenen tahansa rivin."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = TokenStore.create(
+            ["Minoa", "Hatti", "Hellas"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(self.store)
+        self.elevated = {
+            "Authorization": "Bearer "
+            + self.store.claim(self.store.admin_code, "Hellas", "now")
+        }
+        self.plain = {
+            "Authorization": "Bearer "
+            + self.store.claim(self.store.join_code, "Minoa", "now")
+        }
+
+    def _phase(self, phase: int, round_number: int = 1) -> None:
+        self.client.post(
+            "/turn",
+            json={"round_number": round_number, "current_phase": phase},
+            headers=AUTH,
+        )
+
+    def test_joining_with_the_admin_code_reports_the_elevation(self) -> None:
+        store = TokenStore.create(
+            ["Minoa", "Hatti"], tokens_path(Path(self._directory.name))
+        )
+        main.set_token_store(store)
+
+        body = self.client.post(
+            "/join", json={"code": store.admin_code, "civilization": "Hatti"}
+        ).json()
+
+        self.assertTrue(body["elevated"])
+        self.assertEqual(body["civilization"], "Hatti")
+
+    def test_the_roster_takes_either_code_and_says_which(self) -> None:
+        """Yksi kenttä: liittyjän on nähtävä kumman koodin hän näppäili."""
+
+        plain = self.client.post(
+            "/join/roster", json={"code": self.store.join_code}
+        ).json()
+        admin = self.client.post(
+            "/join/roster", json={"code": self.store.admin_code}
+        ).json()
+
+        self.assertFalse(plain["elevated"])
+        self.assertTrue(admin["elevated"])
+        # Sama lista kummallakin: korotus ei muuta sitä mitä paikkoja on.
+        self.assertEqual(
+            [p["civilization"] for p in plain["players"]],
+            [p["civilization"] for p in admin["players"]],
+        )
+
+    def test_a_wrong_code_opens_nothing(self) -> None:
+        wrong = "".join("A" if c != "A" else "B" for c in self.store.join_code)
+
+        response = self.client.post("/join/roster", json={"code": wrong})
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_elevated_phone_edits_another_row(self) -> None:
+        self._phase(1)
+
+        response = self.client.post(
+            "/players/Minoa/cities", json={"value": 4}, headers=self.elevated
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["player"]["cities"], 4)
+
+    def test_a_plain_phone_still_cannot(self) -> None:
+        """Vertailukohta: korotus on se mikä eron tekee, ei liittyminen."""
+
+        self._phase(1)
+
+        response = self.client.post(
+            "/players/Hellas/cities", json={"value": 4}, headers=self.plain
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_elevated_phone_bypasses_the_phase_gates(self) -> None:
+        """Naapurin virhe huomataan yleensä vasta vaiheen jo vaihduttua."""
+
+        self._phase(7)
+
+        census = self.client.post(
+            "/players/Minoa/census", json={"value": 20}, headers=self.elevated
+        )
+        advances = self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["pottery"]},
+            headers=self.elevated,
+        )
+
+        self.assertEqual(census.status_code, 200)
+        self.assertEqual(advances.status_code, 200)
+
+    def test_elevated_phone_may_drop_a_card_from_an_earlier_turn(self) -> None:
+        self._phase(12, round_number=1)
+        self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["mysticism"]},
+            headers=self.elevated,
+        )
+        self._phase(12, round_number=2)
+
+        response = self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["pottery"]},
+            headers=self.elevated,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["player"]["advances"], ["pottery"])
+
+    def test_elevation_stops_at_the_ast_and_the_turn(self) -> None:
+        """Korotus laajentaa rivejä, ei komentoja."""
+
+        details = {
+            "nickname": "Matti",
+            "block": "WEST",
+            "cities": 1,
+            "ast_step": 1,
+            "census": 0,
+            "ast_bonus": False,
+        }
+        for route, body in (
+            ("players/Hellas/ast-step", {"value": 3}),
+            ("players/Minoa/ast-step", {"value": 3}),
+            ("players/Hellas/details", details),
+        ):
+            response = self.client.post(
+                f"/{route}", json=body, headers=self.elevated
+            )
+            self.assertEqual(response.status_code, 403, route)
+
+        turn = self.client.post(
+            "/turn",
+            json={"round_number": 2, "current_phase": 1},
+            headers=self.elevated,
+        )
+        self.assertEqual(turn.status_code, 403)
+
+    def test_state_tells_the_phone_that_it_is_elevated(self) -> None:
+        """Puhelin ei voi päätellä korotustaan mistään muualta."""
+
+        mine = self.client.get("/state", headers=self.elevated).json()["you"]
+        theirs = self.client.get("/state", headers=self.plain).json()["you"]
+
+        self.assertTrue(mine["elevated"])
+        self.assertEqual(mine["civilization"], "Hellas")
+        self.assertFalse(mine["admin"])
+        self.assertFalse(theirs["elevated"])
+
+    def test_releasing_the_seat_ends_the_elevation(self) -> None:
+        """Vapautus on ainoa tapa perua korotus kesken pelin."""
+
+        self.client.post(
+            "/admin/release", json={"civilization": "Hellas"}, headers=AUTH
+        )
+        self._phase(1)
+
+        response = self.client.post(
+            "/players/Minoa/cities", json={"value": 4}, headers=self.elevated
+        )
+
+        # 403 eikä 401: token itsessään kelpaa yhä — vapautus vapauttaa paikan
+        # eikä mitätöi tokenia — mutta korotus on poissa, joten toisen rivi ei
+        # enää aukea.
+        self.assertEqual(response.status_code, 403)
+
+    def test_lobby_reports_the_admin_code_and_who_is_elevated(self) -> None:
+        body = self.client.get("/admin/join", headers=AUTH).json()
+
+        self.assertEqual(body["admin_code"], self.store.admin_code)
+        self.assertNotEqual(body["admin_code"], body["join_code"])
+        elevated = {
+            p["civilization"] for p in body["players"] if p["elevated"]
+        }
+        self.assertEqual(elevated, {"Hellas"})
 
 
 class AdminLobbyTests(HttpTestCase):
