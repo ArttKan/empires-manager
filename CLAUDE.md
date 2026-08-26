@@ -408,7 +408,22 @@ a seat, since the phone deliberately has none. Claiming does not change
 its tab is visible, and redraws only when the status actually differs — otherwise a
 two-second poll would flicker the whole tab.
 
-Remaining: the manifest and service worker for home-screen install.
+**No home-screen install.** A manifest and service worker were planned and then
+dropped: the connection handling — SSE, a `visibilitychange` refetch and a 15 s
+fallback poll — is robust enough that a browser tab is fine, and a service worker
+would cache the app shell, reintroducing the "is this phone running current code"
+problem that `no-store` and the build id exist to prevent. Do not add one without
+a versioned cache key.
+
+**The command log is deliberately write-only.** `service._append_log()` records
+every accepted command and nothing reads it. That is not dead code: it is an audit
+trail — "who set Hellas to 5 cities at 21:14" — which matters with sixteen
+writers, and it is the substrate for undo if that is ever wanted. **Do not remove
+it because nothing consumes it.**
+
+**Undo is not built and is not a priority.** The spec asked for one-step undo, but
+nothing a player can do is hard to reverse by hand, and the game master can
+correct anything from the desktop app.
 
 **No browser TV display.** The laptop drives the TV with the Tkinter views, which
 removed the largest piece of Phase C. Mobile browsers drop SSE when the screen
@@ -423,5 +438,5 @@ pure-logic modules must stay stdlib-only** so they keep running without the venv
 ## Out of scope (do not build unasked)
 
 Trade card hands or trading, automatic calamity resolution, map/token/ship
-tracking, accounts or cloud storage, hardening against hand-edited save files, and
-games outside 3–18 players.
+tracking, accounts or cloud storage, hardening against hand-edited save files,
+games outside 3–18 players, a PWA service worker, and undo.
