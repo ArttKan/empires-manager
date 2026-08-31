@@ -176,7 +176,14 @@
     display: block; font-style: normal; font-size: .62rem;
     color: var(--muted); letter-spacing: .08em;
   }
-  .card .price { text-align: right; font-variant-numeric: tabular-nums; }
+  .card .price {
+    text-align: right; font-variant-numeric: tabular-nums;
+    /* Kiinteä leveys kolmelle numerolle. Ilman sitä sarake kutistuu
+       kaksinumeroisella hinnalla — ja katoaa kokonaan jo ostetulta kortilta,
+       jolla ei ole hintaa — jolloin joustava nimisarake levenee ja VP-sarake
+       siirtyy riviltä toiselle. Kallein kortti on 290, joten kolme riittää. */
+    flex: none; min-width: 36px;
+  }
   .card .price .now { font-size: 1.05rem; font-weight: 700; }
   .card .price .was { color: var(--muted); font-size: .75rem; text-decoration: line-through; }
   .cards-head {
