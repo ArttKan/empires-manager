@@ -356,8 +356,8 @@ class AdvanceCatalogueTests(HttpTestCase):
             set(first),
             {
                 "id", "name", "cost", "vp", "groups", "owned", "locked",
-                "effective_cost", "color_discount", "row_discount",
-                "applied_group",
+                "this_turn", "effective_cost", "color_discount",
+                "row_discount", "applied_group",
             },
         )
 
@@ -535,6 +535,31 @@ class PermanentAdvanceTests(HttpTestCase):
 
         locked = {a["id"] for a in body["advances"] if a["locked"]}
         self.assertEqual(locked, {"mysticism"})
+
+    def test_catalogue_separates_this_turn_from_earlier_turns(self) -> None:
+        """Ryhmittely tarvitsee ostohetken, ei lukitusta.
+
+        `locked` kertoo vain saako kortin perua, ja korotetulla puhelimella se
+        on aina tyhjä — silloin kaikki ostetut valuisivat samaan ryhmään.
+        """
+
+        self.client.post(
+            "/players/Hellas/advances",
+            json={"advances": ["mysticism", "pottery"]},
+            headers=self.player,
+        )
+
+        body = self.client.get(
+            "/players/Hellas/advances", headers=self.player
+        ).json()
+        by_id = {a["id"]: a for a in body["advances"]}
+
+        # Mysticism on kierrokselta 1, Pottery juuri ostettu kierroksella 2.
+        self.assertFalse(by_id["mysticism"]["this_turn"])
+        self.assertTrue(by_id["pottery"]["this_turn"])
+        # Ostamaton kortti ei ole kummassakaan ryhmässä.
+        self.assertFalse(by_id["monument"]["this_turn"])
+        self.assertFalse(by_id["monument"]["owned"])
 
     def test_player_cannot_drop_an_earlier_card(self) -> None:
         response = self.client.post(
@@ -1093,6 +1118,33 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(
             {a["id"] for a in theirs["advances"] if a["locked"]}, {"mysticism"}
         )
+
+    def test_purchase_turn_survives_the_gate_bypass(self) -> None:
+        """Korotetulla ei ole lukittuja kortteja, mutta ostohetki on silti tosi."""
+
+        self._phase(12, round_number=1)
+        self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["mysticism"]},
+            headers=self.elevated,
+        )
+        self._phase(12, round_number=2)
+        self.client.post(
+            "/players/Minoa/advances",
+            json={"advances": ["mysticism", "pottery"]},
+            headers=self.elevated,
+        )
+
+        body = self.client.get(
+            "/players/Minoa/advances", headers=self.elevated
+        ).json()
+        by_id = {a["id"]: a for a in body["advances"]}
+
+        # Mikään ei ole lukittu — ohitus on voimassa …
+        self.assertEqual([a for a in body["advances"] if a["locked"]], [])
+        # … mutta ryhmittely erottaa silti kierrokset toisistaan.
+        self.assertFalse(by_id["mysticism"]["this_turn"])
+        self.assertTrue(by_id["pottery"]["this_turn"])
 
     def test_elevation_stops_at_the_ast_and_the_turn(self) -> None:
         """Korotus laajentaa rivejä, ei komentoja."""

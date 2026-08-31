@@ -41,7 +41,7 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 293 tests
+.venv/bin/python -m unittest discover -v    # all 295 tests
 python3 -m unittest discover -v             # 188 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
@@ -473,9 +473,18 @@ seat picker, then the player's own row with a Scoreboard tab.
   price. The band colour is therefore the only group signal on a card, which is
   a deliberate exception to "colour is never the only signal": nothing is lost by
   not reading it. The credits legend at the top of the sheet keeps the names.
-- **Cards are ordered by VP band, 1 → 3 → 6.** That is what a player is choosing
-  between. `sort` is stable, so the Advancement Reference order survives inside
-  each band. The order is still fixed when the sheet opens, never on a tap.
+- **Cards are ordered in three groups: earlier turns, this turn, unbought** —
+  and by VP band 1 → 3 → 6 inside each. `sort` is stable, so the Advancement
+  Reference order survives inside a band. **The order is computed when the sheet
+  opens and never on a tap**: if a card changed group when tapped it would jump
+  up the list and move the next one out from under the player's thumb. Re-opening
+  the sheet mid-phase is therefore what separates what you just bought from what
+  you already had.
+- **The group comes from `this_turn`, not from `locked`.** They look
+  interchangeable and are not: `locked` says only whether a card may be
+  *un*-bought, and an elevated phone has nothing locked at all, so grouping on it
+  would collapse every owned card into one block for exactly the person most
+  likely to be checking. `GET /players/{civ}/advances` sends both.
 - **VP and price are different columns.** They are different kinds of number —
   VP is the card's fixed worth, the price moves with credits — and putting them
   in the same slot is what produced the earlier "7 advances" confusion between

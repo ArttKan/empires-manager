@@ -817,11 +817,19 @@ async function openAdvances() {
   // kortti hyppäisi listan alkuun juuri kun siihen koskee ja seuraava
   // napautettava siirtyisi sormen alta.
   //
-  // Ensin omat kortit, sitten ostettavat. Kummankin ryhmän sisällä VP-luokka
-  // 1 -> 3 -> 6, koska se on se mitä pelaaja kortista miettii. `sort` on
-  // vakaa, joten luokan sisällä säilyy referenssitaulukon järjestys.
+  // Kolme ryhmää: aiemmilla kierroksilla ostetut, tällä kierroksella ostetut,
+  // ja vielä ostamattomat. Kummankin ostetun ryhmän erottaminen on koko syy
+  // avata arkki uudelleen kesken ostovaiheen — muuten juuri ostettu katoaa
+  // vanhojen sekaan eikä pelaaja näe mitä hän tällä kierroksella otti.
+  //
+  // Järjestys lasketaan vain avattaessa. Jos ryhmä vaihtuisi napautuksesta,
+  // kortti hyppäisi listalla ylös ja seuraava napautettava siirtyisi sormen
+  // alta — sama virhe jota koko ohjelma yrittää estää.
+  const group = (a) => (!a.owned ? 2 : a.this_turn ? 1 : 0);
+  // Ryhmän sisällä VP-luokka 1 -> 3 -> 6, koska se on se mitä pelaaja kortista
+  // miettii. `sort` on vakaa, joten sen sisällä säilyy taulukon järjestys.
   ordered = [...body.advances].sort(
-    (a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0) || a.vp - b.vp
+    (a, b) => group(a) - group(b) || a.vp - b.vp
   );
   renderAdvances();
   // Arkki on pelaajan mielestä oma näkymänsä, joten laitteen paluuele saa

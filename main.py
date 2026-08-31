@@ -406,6 +406,10 @@ async def advance_catalogue(
     # purkaa aiempienkin kierrosten kortteja. Muuten lista estäisi sen mitä
     # palvelin ottaisi vastaan.
     locked = set() if principal.bypasses_gates else set(discounting)
+    # Milloin kortti ostettiin. Eri asia kuin `locked`, joka kertoo vain saako
+    # sen perua: korotetulla puhelimella mikään ei ole lukittu, mutta listan
+    # ryhmittely tarvitsee silti tiedon ostohetkestä.
+    bought_now = set(player.advances) - set(discounting)
     totals = color_credits(player, game.player_count, owned=discounting)
     entries = []
     for advance in ADVANCES:
@@ -422,6 +426,7 @@ async def advance_catalogue(
                 "owned": advance.id in owned,
                 # Aiempien kierrosten kortit ovat pysyviä: niitä ei voi purkaa.
                 "locked": advance.id in locked,
+                "this_turn": advance.id in bought_now,
                 "effective_cost": price.effective_cost,
                 "color_discount": price.color_discount,
                 "row_discount": price.special_discount,
