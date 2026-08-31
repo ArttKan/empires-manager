@@ -41,8 +41,8 @@ Trade Cards Acquisition, Calamity, …) — they are printed on the components.
 
 ```bash
 python3 app.py                              # run the app (needs a display)
-.venv/bin/python -m unittest discover -v    # all 290 tests
-python3 -m unittest discover -v             # 186 tests; HTTP/remote tests skip
+.venv/bin/python -m unittest discover -v    # all 293 tests
+python3 -m unittest discover -v             # 188 tests; HTTP/remote tests skip
 .venv/bin/python -m unittest tests.test_http
 .venv/bin/uvicorn main:app --reload         # run the server locally
 ```
@@ -148,6 +148,16 @@ repo root is always on `sys.path` because every entry point lives there.
   phase but a real one cannot be un-bought. Enforced server-side for player tokens
   (422) and shown as a locked row in the PWA. **Admin bypasses it** — the game
   master must be able to correct a misrecorded card.
+- **An Advance's colour band is not the same thing as the credits it gives.**
+  `groups` is the band and decides *which credit pool discounts the card*;
+  `credits` is what the card *pays into* the pools. For a two-colour card
+  `advance_price()` takes the **larger of its two pools, never the sum**. The two
+  are independent on the component, but no card's band names a colour it does not
+  itself credit — Written Record was marked `ART+CIVIC` while crediting CIVIC and
+  SCIENCE, the only violation among 51, and it silently discounted from a pool the
+  card never fills. `test_a_bands_colours_are_all_colours_it_credits` pins the
+  invariant; the nine two-colour cards are the ones worth re-checking against the
+  Advancement Reference if a price ever looks wrong.
 - **`ADVANCE_CHAINS` is derived positionally** — `data.py` slices `ADVANCES` into
   consecutive triples, so each row of `_ADVANCE_ROWS` is one 1 VP → 3 VP → 6 VP
   discount chain. **Reordering or inserting a row silently breaks the discount
@@ -453,6 +463,24 @@ seat picker, then the player's own row with a Scoreboard tab.
   and `GET /players/{civ}/advances`. Reimplementing the VP bands or the colour
   credits and row-chain discounts in JavaScript would duplicate `scoring.py` and
   `credits.py`, and the two would drift silently until someone disputed a score.
+- **A two-colour card's stripe is an element, not a border.** A border can only
+  carry one colour, so `groups[0]` was being drawn and nine cards looked
+  single-coloured. `.card .band` is a real child with a hard-stop
+  `linear-gradient`. The desktop's `_advance_choice` already split them.
+- **The Advance card names no group.** ART/CIVIC/CRAFT/RELIGION/SCIENCE are
+  bookkeeping terms the players do not use, and the group is not something a
+  phone user acts on — the discount is computed server-side and arrives as the
+  price. The band colour is therefore the only group signal on a card, which is
+  a deliberate exception to "colour is never the only signal": nothing is lost by
+  not reading it. The credits legend at the top of the sheet keeps the names.
+- **Cards are ordered by VP band, 1 → 3 → 6.** That is what a player is choosing
+  between. `sort` is stable, so the Advancement Reference order survives inside
+  each band. The order is still fixed when the sheet opens, never on a tap.
+- **VP and price are different columns.** They are different kinds of number —
+  VP is the card's fixed worth, the price moves with credits — and putting them
+  in the same slot is what produced the earlier "7 advances" confusion between
+  points and cards. An owned card shows no price, because there is none left to
+  pay; the tick already says it is bought.
 - **Advance selections are held locally until Save**, and the list order is fixed
   when the sheet opens — re-sorting on every tap would move the next card out from
   under the player's thumb.

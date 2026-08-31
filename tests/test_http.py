@@ -322,6 +322,19 @@ class PlayerAppTests(HttpTestCase):
 
         self.assertIn(".hidden { display: none !important; }", text)
 
+    def test_a_card_shows_every_colour_of_its_band(self) -> None:
+        """Kaksivärisen kortin alennus tulee kummasta tahansa altaasta.
+
+        Raita piirrettiin ennen `groups[0]`:sta, jolloin yhdeksän korttia
+        näytti yksivärisiltä ja kertoi itsestään puolet. Raita on siksi oma
+        elementtinsä eikä reunaviiva: reunalla voi olla vain yksi väri.
+        """
+
+        text = self.client.get("/").text
+
+        self.assertIn('class="band"', text)
+        self.assertNotIn("groups[0]", text)
+
     def test_page_carries_no_token_or_game_data(self) -> None:
         response = self.client.get("/")
 
