@@ -345,7 +345,12 @@ const ENTRY_FAILED =
 const el = (id) => document.getElementById(id);
 const TABBED = ["play", "board"];   // näkymät joissa välilehtipalkki näkyy
 
+// Mikä osio on näkyvissä. Paluunapin käsittelijän on tiedettävä se: se saa
+// sulkea vain Advances-arkin, ei viedä pelaajaa pois sivulta muualta.
+let view = "join-code";
+
 const show = (id) => {
+  view = id;
   for (const s of ["join-code", "join-seat", "play", "board", "cards"]) {
     el(s).classList.toggle("hidden", s !== id);
   }
@@ -805,11 +810,17 @@ async function openAdvances() {
   // kortti hyppäisi listan alkuun juuri kun siihen koskee ja seuraava
   // napautettava siirtyisi sormen alta.
   //
-  // Lajitteluperuste on VP-luokka 1 -> 3 -> 6, koska se on se mitä pelaaja
-  // kortista miettii. `sort` on vakaa, joten luokan sisällä säilyy
-  // referenssitaulukon järjestys.
-  ordered = [...body.advances].sort((a, b) => a.vp - b.vp);
+  // Ensin omat kortit, sitten ostettavat. Kummankin ryhmän sisällä VP-luokka
+  // 1 -> 3 -> 6, koska se on se mitä pelaaja kortista miettii. `sort` on
+  // vakaa, joten luokan sisällä säilyy referenssitaulukon järjestys.
+  ordered = [...body.advances].sort(
+    (a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0) || a.vp - b.vp
+  );
   renderAdvances();
+  // Arkki on pelaajan mielestä oma näkymänsä, joten laitteen paluuele saa
+  // sulkea sen sivulta poistumisen sijaan. Merkintä kulutetaan jokaisessa
+  // uloskäynnissä, muuten pino kasvaisi joka avauksella.
+  history.pushState({ view: "cards" }, "");
   show("cards");
   window.scrollTo(0, 0);
 }
@@ -923,7 +934,7 @@ async function saveAdvances() {
   el("cards-save").disabled = false;
   if (ok) {
     await refresh();
-    show("play");
+    closeCards();
     return;
   }
   if (status === 409) {
@@ -1015,7 +1026,21 @@ el("other-back").onclick = () => {
 el("tab-board").onclick = () => { renderBoard(); show("board"); };
 
 el("cards-open").onclick = openAdvances;
-el("cards-cancel").onclick = () => { show("play"); };
+el("cards-cancel").onclick = () => { closeCards(); };
+
+function closeCards() {
+  // back() laukaisee popstaten, joka tekee varsinaisen näkymänvaihdon — yksi
+  // reitti ulos riippumatta siitä painoiko käyttäjä Cancelia vai laitteen
+  // paluunappia.
+  if (history.state && history.state.view === "cards") history.back();
+  else show("play");
+}
+
+window.addEventListener("popstate", () => {
+  // Vain arkki on suljettavissa näin. Muualla paluu saa poistua sivulta,
+  // kuten selaimessa kuuluukin.
+  if (view === "cards") show("play");
+});
 el("cards-save").onclick = saveAdvances;
 
 el("cities-down").onclick = () => changeCities(-1);
