@@ -2,6 +2,7 @@ import unittest
 
 from src.core.data import (
     ADVANCES,
+    ADVANCE_BY_ID,
     ADVANCE_CHAINS,
     AST_MAX_STEP,
     BASIC_AST_ERA_STARTS,
@@ -163,6 +164,40 @@ class DataTests(unittest.TestCase):
         self.assertEqual(
             basic_ast_era_starts("Minoa", 3, "WEST"),
             BASIC_AST_ERA_STARTS["Minoa"],
+        )
+
+    def test_a_bands_colours_are_all_colours_it_credits(self) -> None:
+        """Kortin väriraita kertoo mistä altaasta sen alennus otetaan.
+
+        Raita ja krediitit ovat eri asioita, mutta yhdenkään kortin raidassa ei
+        ole väriä johon se ei itse anna krediittiä. Written Record oli merkitty
+        ART+CIVIC vaikka se antaa CIVIC ja SCIENCE — ainoa poikkeus 51:stä, ja
+        siksi virhe eikä sääntö. Tämä testi löytää seuraavan samanlaisen.
+        """
+
+        for advance in ADVANCES:
+            credited = {group for group, _ in advance.credits}
+            for group in advance.groups:
+                self.assertIn(
+                    group,
+                    credited,
+                    f"{advance.name} band names {group}, which it does not credit",
+                )
+
+    def test_written_record_is_civic_and_science(self) -> None:
+        """Punainen ja vihreä, referenssitaulukon mukaan.
+
+        Väärä raita ei näy mitenkään ennen kuin joku laskee hintaa: alennus
+        otettiin ART-altaasta, jota kortti ei edes kartuta.
+        """
+
+        written_record = ADVANCE_BY_ID["written_record"]
+
+        self.assertEqual(written_record.groups, ("CIVIC", "SCIENCE"))
+        # Rivi on osa ketjua Written Record -> Cartography -> Library, jotka
+        # molemmat ovat SCIENCE — järjestystä ei saa muuttaa korjatessa.
+        self.assertIn(
+            ("written_record", "cartography", "library"), ADVANCE_CHAINS
         )
 
     def test_invalid_mode_and_player_count_are_rejected(self) -> None:

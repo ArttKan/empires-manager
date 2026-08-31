@@ -74,7 +74,7 @@ _ADVANCE_ROWS = (
     ("Monarchy", 60, ("CIVIC",)),
     ("Law", 150, ("CIVIC",)),
     ("Cultural Ascendancy", 280, ("ART",)),
-    ("Written Record", 60, ("ART", "CIVIC")),
+    ("Written Record", 60, ("CIVIC", "SCIENCE")),
     ("Cartography", 160, ("SCIENCE",)),
     ("Library", 220, ("SCIENCE",)),
     ("Pottery", 60, ("CRAFT",)),
