@@ -1,15 +1,15 @@
-; Tämä tiedosto on unitin ainoa versio: siinä ei ole salaisuuksia, joten se on
-; tavallinen gitin seuraama tiedosto ja päivittyy palvelimelle normaalisti.
-; Salaisuudet luetaan EnvironmentFile-tiedostosta repon ulkopuolelta.
+; This file is the only version of the unit: it holds no secrets, so it is an
+; ordinary git-tracked file and reaches the server normally.
+; The secrets are read from an EnvironmentFile outside the repo.
 ;
-; Asennus:
+; Installation:
 ;   sudo cp deploy/mega-empires-backend.service /etc/systemd/system/
 ;   sudo systemctl daemon-reload
 ;   sudo systemctl restart mega-empires-backend.service
 ;
-; HUOM: EnvironmentFile on pakollinen. Jos tiedosto puuttuu, palvelu ei käynnisty
-; lainkaan — tämä on tahallista, jotta puuttuva token näkyy heti eikä vasta
-; virheellisenä ajonaikaisena käytöksenä.
+; NOTE: EnvironmentFile is mandatory. If the file is missing the service does not
+; start at all — deliberately, so that a missing token shows immediately rather
+; than as wrong behaviour at runtime.
 
 [Unit]
 Description=Mega Empires backend
@@ -22,41 +22,41 @@ User=megaempires
 Group=megaempires
 WorkingDirectory=/home/megaempires/mega-empires-backend
 
-; StateDirectory luo /var/lib/mega-empires, antaa sen omistajuuden palvelun
-; käyttäjälle ja avaa sen kirjoitettavaksi ProtectSystem=strict -asetuksesta
-; huolimatta. Tallennukset ovat siten koodihakemiston ulkopuolella, joten
-; git-päivitys ei voi hävittää niitä.
+; StateDirectory creates /var/lib/mega-empires, gives it to the service user and
+; keeps it writable despite ProtectSystem=strict. The saves therefore live
+; outside the source directory, where a git update cannot destroy them.
 StateDirectory=mega-empires
 StateDirectoryMode=0750
 Environment=MEGA_EMPIRES_DATA_DIR=/var/lib/mega-empires
 
-; Salaisuudet tulevat repon ulkopuolelta. Tiedosto on root:root 0600, mutta
-; systemd lukee sen ennen käyttäjän vaihtoa, joten sovelluskäyttäjän ei tarvitse
-; päästä siihen käsiksi lainkaan.
+; The secrets come from outside the repo. The file is root:root 0600, but systemd
+; reads it before dropping to the service user, so the application account never
+; needs access to it at all.
 ;
-; Sisältö (yksi rivi):
+; Contents (one line):
 ;   ECHO_TOKEN=<oikea token>
 ;
-; Muuttujan nimen on vastattava main.py:n lukemaa nimeä (ECHO_TOKEN). Väärä nimi
-; ei estä käynnistystä, vaan näkyy vasta /echo-reitin HTTP 500 -vastauksena.
+; The variable name must match what main.py reads (ECHO_TOKEN, or the newer
+; MEGA_EMPIRES_TOKEN). A wrong name does not stop startup; it shows up as HTTP
+; 500 on the first request that needs the token.
 EnvironmentFile=/etc/mega-empires-backend.env
 
-; Sovellus on main.py ja se palvelee myös sse-test.html-tiedoston suhteellisella
-; polulla, joten WorkingDirectory on merkityksellinen eikä vain kosmeettinen.
-; --timeout-graceful-shutdown on pakollinen: /events on ääretön vastaus, ja ilman
-; sitä uvicorn jää odottamaan avoimia SSE-virtoja eikä poistu. Yksikin auki oleva
-; puhelin jumittaa `systemctl restart`in TimeoutStopSecin loppuun asti.
+; The application is main.py, and it serves web/index.html by a relative path, so
+; WorkingDirectory is load-bearing rather than cosmetic.
+; --timeout-graceful-shutdown is mandatory: /events is an infinite response, and
+; without it uvicorn waits on open SSE streams and never exits. A single open
+; phone hangs `systemctl restart` until TimeoutStopSec runs out.
 ExecStart=/home/megaempires/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 \
     --timeout-graceful-shutdown 5
 Restart=always
 RestartSec=2
-; Varmistus siltä varalta että prosessi ei silti poistu: systemd tappaa sen
-; 20 sekunnissa oletusarvoisen 90:n sijaan.
+; A backstop in case the process still does not exit: systemd kills it after
+; 20 seconds rather than the default 90.
 TimeoutStopSec=20
 
-; Kun tallennukset siirtyivät /var/lib-hakemistoon, palvelu ei enää tarvitse
-; kirjoitusoikeutta omaan hakemistoonsa: ajossa oleva sovellus ei voi muuttaa
-; omaa koodiaan. Deploy-skripti kirjoittaa sinne sandboxin ulkopuolelta.
+; Once the saves moved to /var/lib, the service no longer needs write access to
+; its own directory: a running application cannot alter its own code. The deploy
+; script writes there from outside the sandbox.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

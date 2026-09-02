@@ -30,9 +30,13 @@ own data from phones. See "Backend conversion" below.
 | Conversation with the user | **English** (user's explicit instruction) |
 | This file | English |
 | All user-visible GUI strings, desktop and PWA | **English** — must match the rulebooks and printed components |
-| Source code comments and docstrings | **Finnish** — match the existing style |
-| Commit messages | **Finnish** |
+| Source code comments and docstrings | **English** |
+| Commit messages | the user's own — never write or amend one |
 | `README.md`, `deploy/README.md` | **English** — the repo is public and these are what a stranger reads |
+
+Comments were Finnish until 2026-09-02 and much of the existing body still is;
+translate a file's comments when you have reason to work in it, and never leave a
+file half-and-half. New comments are English regardless.
 
 Domain terms stay in English everywhere (Civilization Advance, Census, A.S.T.,
 Trade Cards Acquisition, Calamity, …) — they are printed on the components.

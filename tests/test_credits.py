@@ -84,10 +84,10 @@ class CreditTests(unittest.TestCase):
 
 
 class SameTurnDiscountTests(unittest.TestCase):
-    """Hankintavaihe on yhtäaikainen: saman kierroksen ostot eivät alenna toisiaan."""
+    """Acquisition is simultaneous: same-turn purchases do not discount each other."""
 
     def test_untagged_advances_count_as_old(self) -> None:
-        """Ennen tätä sääntöä tallennetut pelit eivät saa menettää alennuksiaan."""
+        """Games saved before this rule must not lose their discounts."""
 
         player = PlayerState("Hellas", "M", "WEST", advances=["mysticism"])
 

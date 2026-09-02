@@ -1,4 +1,4 @@
-"""Sequence of Play -vaiheet ja niiden pelaajajärjestykset."""
+"""The Sequence of Play phases and their player orders."""
 
 from __future__ import annotations
 
@@ -202,19 +202,20 @@ PHASES = (
 
 PHASE_BY_NUMBER = {phase.number: phase for phase in PHASES}
 
-# Census lasketaan laudalta vaiheessa 2. Vaihe 3 kuluttaa luvun Movementin
-# järjestykseen, mutta ei muuta sitä, joten kirjausikkuna on vain vaihe 2.
-# Kannettavaa tämä ei koske: pelinjohtajan on voitava korjata tieto milloin vain.
+# Census is counted off the board in phase 2. Phase 3 consumes the number for
+# the Movement order but does not change it, so the entry window is phase 2
+# alone. This does not apply to the laptop: the game master must be able to
+# correct the value at any time.
 CENSUS_PHASES = frozenset({2})
 
-# Advance-kortit ostetaan vaiheessa 12. Muissa vaiheissa puhelimelta tehty
-# muutos on käytännössä aina vahinko — koko korttivalikoima kirjoitetaan
-# kerralla, joten väärä tallennus pyyhkii pelaajan kortit.
+# Advances are bought in phase 12. In any other phase a change made from a
+# phone is in practice always an accident — the whole card set is written at
+# once, so a mistaken save wipes the player's cards.
 ADVANCE_PHASES = frozenset({12})
 
-# Komennot, jotka puhelin saa lähettää vain tietyissä vaiheissa. Kaupunkimäärä
-# ei ole listalla tarkoituksella: se muuttuu myös konflikteissa ja
-# calamityissä, joten kapea ikkuna haittaisi enemmän kuin suojaisi.
+# The commands a phone may send only in certain phases. The city count is
+# deliberately absent: it changes through conflict and calamities too, so a
+# narrow window would block more corrections than it prevents mistakes.
 PHASE_GATED_COMMANDS = {
     "census": CENSUS_PHASES,
     "advances": ADVANCE_PHASES,
@@ -243,7 +244,7 @@ SURPLUS_SUPPORT_ADVANCES = frozenset(
 
 
 def ast_ranking_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta pelaajat sivilisaatioiden kiinteässä A.S.T.-järjestyksessä."""
+    """Return the players in the civilizations' fixed A.S.T. order."""
 
     return sorted(
         players,
@@ -252,7 +253,7 @@ def ast_ranking_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def ast_progress_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta pisimmällä A.S.T.:lla olevat ensin, ranking tasakriteerinä."""
+    """Return those furthest along the A.S.T. first, ranking as the tie-break."""
 
     return sorted(
         players,
@@ -264,7 +265,7 @@ def ast_progress_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def movement_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta Census-järjestys niin, että Militaryn omistajat ovat lopussa."""
+    """Return the Census order with the Military holders placed last."""
 
     return sorted(
         players,
@@ -277,7 +278,7 @@ def movement_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def trade_card_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta kortteihin oikeutetut pelaajat nousevassa kaupunkijärjestyksessä."""
+    """Return the players entitled to cards, by ascending city count."""
 
     return sorted(
         (player for player in players if player.cities > 0),
@@ -289,7 +290,7 @@ def trade_card_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def special_ability_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta Special Ability -korttien omistajat A.S.T.-Progress-järjestyksessä."""
+    """Return the Special Ability card holders in A.S.T. Progress order."""
 
     eligible = [
         player
@@ -300,7 +301,7 @@ def special_ability_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def surplus_support_players(players: list[PlayerState]) -> list[PlayerState]:
-    """Palauta vain vaiheen 11 kortteja omistavat A.S.T.-järjestyksessä."""
+    """Return only the holders of phase 11 cards, in A.S.T. order."""
 
     eligible = [
         player
@@ -311,7 +312,7 @@ def surplus_support_players(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def phase_order(phase: Phase, players: list[PlayerState]) -> list[PlayerState]:
-    """Laske vaiheen pelaajalista sen määrittämän järjestyssäännön mukaan."""
+    """Build the phase's player list from the ordering rule it specifies."""
 
     if phase.player_order == "ast_ranking":
         return ast_ranking_order(players)
@@ -333,7 +334,7 @@ def adjacent_phase(
     current_phase: int,
     direction: int,
 ) -> tuple[int, int]:
-    """Siirrä vaihetta eteen- tai taaksepäin kierrosrajojen yli."""
+    """Step the phase forwards or backwards across turn boundaries."""
 
     turn = max(1, int(round_number))
     phase = max(1, min(len(PHASES), int(current_phase)))

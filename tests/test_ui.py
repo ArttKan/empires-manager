@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# Palvelinasennus on headless eikä siinä ole python3-tk-pakettia. Tällöin koko
-# moduuli ohitetaan, jotta testit voi ajaa myös palvelimella ennen käynnistystä.
+# The server install is headless and has no python3-tk package. The whole
+# module is then skipped, so the suite can run on the server before starting.
 if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
     raise unittest.SkipTest("tkinter is not installed")
 
@@ -292,7 +292,7 @@ class ScoreboardUiTests(unittest.TestCase):
         return values
 
     def test_census_entry_issues_one_command_and_skips_no_op_edits(self) -> None:
-        """Census-kenttä lähettää komennon eikä muuta pelaajaoliota itse."""
+        """The Census field sends a command and never mutates the player itself."""
 
         interpreter = tk.Tcl()
         value = tk.StringVar(master=interpreter, value="37")
@@ -310,12 +310,12 @@ class ScoreboardUiTests(unittest.TestCase):
         self.assertEqual(app.service.snapshot().players[0].census, 37)
         self.assertEqual(app.service.snapshot().state_version, 1)
 
-        # Sama arvo uudelleen ei saa nostaa versiota eikä kirjata lokiin.
+        # The same value again must not bump the version or write to the log.
         app._commit_census(app.game.players[0], value)
         self.assertEqual(app.service.snapshot().state_version, 1)
 
     def test_counter_reads_the_current_value_not_the_captured_copy(self) -> None:
-        """Painikkeen sulkeuma pitää piirtohetken kopiota; komento ei saa käyttää sitä."""
+        """A button's closure holds a draw-time copy; the command must not use it."""
 
         game = GameState(
             player_count=1,
@@ -331,28 +331,28 @@ class ScoreboardUiTests(unittest.TestCase):
         app._change_cities(stale, 1)
         app._change_cities(stale, 1)
 
-        # Vanhentuneesta kopiosta laskien tulos olisi 3, tuoreesta 4.
+        # Counting from the stale copy the result would be 3, from the fresh one 4.
         self.assertEqual(app.service.snapshot().players[0].cities, 4)
 
 
 class ScoreboardRowUpdateTests(unittest.TestCase):
-    """Rivit rakennetaan kerran ja päivitetään paikallaan.
+    """Rows are built once and updated in place.
 
-    Aiemmin jokainen muutos tuhosi ja loi lähes 500 widgetiä, mikä maksoi
-    18 pelaajalla yli sekunnin. Nämä testit estävät paluun siihen.
+    Every change used to destroy and create nearly 500 widgets, which cost over
+    a second at 18 players. These tests prevent a return to that.
     """
 
     def setUp(self) -> None:
         try:
             self.root = tk.Tk()
-        except tk.TclError as error:  # ei näyttöä käytettävissä
+        except tk.TclError as error:  # no display available
             raise unittest.SkipTest(f"no display: {error}")
         self.root.withdraw()
 
-        # `_open_game` tallentaa heti. Ilman omaa hakemistoa tallennus menisi
-        # `default_save_path()`:iin eli kehittäjän oikeaan `tallennukset/`
-        # -hakemistoon ja korvaisi käynnissä olevan pelin. Sekä polku että
-        # ympäristömuuttuja asetetaan, jotta kumpikaan reitti ei osu sinne.
+        # `_open_game` saves immediately. Without a directory of its own the save
+        # would go to `default_save_path()`, that is the developer's real
+        # `tallennukset/` directory, and overwrite a live game. Both the path and the
+        # environment variable are set so neither route can land there.
         self._directory = tempfile.TemporaryDirectory()
         self._environment = mock.patch.dict(
             os.environ, {DATA_DIRECTORY_VARIABLE: self._directory.name}
@@ -422,7 +422,7 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         self.assertIn("A.S.T. bonus", self._text("Hellas", "subtitle"))
 
     def test_census_field_is_not_overwritten_while_focused(self) -> None:
-        """Kesken kirjoituksen olevaa kenttää ei saa kirjoittaa yli."""
+        """A field being typed into must not be overwritten."""
 
         widgets = self.app._row_widgets["Hellas"]
         widgets["census_var"].set("41")
@@ -462,7 +462,7 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         )
 
     def test_sequence_shell_is_built_once(self) -> None:
-        """Koko välilehden uudelleenrakennus maksoi 18 pelaajalla ~100 ms."""
+        """Rebuilding the whole tab cost ~100 ms at 18 players."""
 
         self.app.notebook.select(self.app.sequence_tab)
         self.app._refresh_sequence()
@@ -481,7 +481,7 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
         )
 
     def test_irrelevant_change_does_not_redraw_the_phase_detail(self) -> None:
-        """Census vaikuttaa vaiheeseen 3; vaihetta 12 katsottaessa ei mihinkään."""
+        """Census affects phase 3; while looking at phase 12 it affects nothing."""
 
         self.app.game.current_phase = 12
         self.app._refresh_sequence()
@@ -535,7 +535,7 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
     def test_hidden_tabs_are_deferred_until_shown(self) -> None:
         self.app._refresh_all()
 
-        # Scoreboard on näkyvissä, joten vain se piirrettiin.
+        # The Scoreboard is visible, so only it was drawn.
         self.assertNotIn("summary", self.app._pending_tabs)
         self.assertIn("ast", self.app._pending_tabs)
         self.assertIn("sequence", self.app._pending_tabs)
@@ -546,10 +546,11 @@ class ScoreboardRowUpdateTests(unittest.TestCase):
 
 
 class _StubRemote(RemoteGameService):
-    """RemoteGameService, joka ei koske verkkoon.
+    """A RemoteGameService that never touches the network.
 
-    Peritään oikeasta luokasta, koska `_poll` ja tilarivi tunnistavat etätilan
-    isinstancella — stub-luokka ohittaisi sen haaran kokonaan.
+    It inherits from the real class because `_poll` and the status line detect
+    remote mode with isinstance — a standalone stub would skip that branch
+    entirely.
     """
 
     def __init__(self, snapshots) -> None:
@@ -577,7 +578,7 @@ class RemoteModeTests(unittest.TestCase):
         self.app.save_path = None
         self.app.game = self._game(state_version=1)
         self.app.service = None
-        # Kysely piirtää vain kun päänäkymä on pystyssä.
+        # The poll draws only while the main view is up.
         self.app._view_live = True
 
     def tearDown(self) -> None:
@@ -633,7 +634,7 @@ class RemoteModeTests(unittest.TestCase):
         self.assertFalse(self.app._connected)
 
     def test_failed_poll_backs_off(self) -> None:
-        """Estävä urllib + tiheä kysely = jumittunut käyttöliittymä."""
+        """Blocking urllib + frequent polling = a frozen UI."""
 
         self.app.service = _StubRemote([ServiceUnavailable("boom")])
         scheduled = []
@@ -660,10 +661,11 @@ class RemoteModeTests(unittest.TestCase):
         self.assertEqual(self.app.game.state_version, 5)
 
     def test_outage_during_a_command_says_the_change_was_not_saved(self) -> None:
-        """Katko ei ole hylkäys, joten näkymä jää ennalleen ja näyttää oikealta.
+        """An outage is not a rejection, so the view stays and looks correct.
 
-        Ilman nimenomaista ilmoitusta pelinjohtaja luulisi muutoksen menneen
-        perille, eikä mikään kertoisi että peiliin pääsee käynnistämällä uudelleen.
+        Without an explicit message the game master would think the change had
+        gone through, and nothing would say that the mirror is reachable by
+        restarting.
         """
 
         def unreachable():
@@ -677,12 +679,13 @@ class RemoteModeTests(unittest.TestCase):
         self.assertFalse(accepted)
         message = shown.call_args[0][1]
         self.assertIn("was not saved", message)
-        # Syy kuuluu tähän dialogiin: juuri tässä kysytään onko vika verkossa.
+        # The reason belongs in this dialog: this is where the question is whether
+        # the network is at fault.
         self.assertIn("Connection refused", message)
         self.assertIn(ui_module.OFFLINE_HINT, message)
 
     def test_offline_header_gives_the_route_back(self) -> None:
-        """Rivi luetaan televisiosta: ohje on hyödyllinen, urllibin teksti ei."""
+        """The line is read from a TV: the hint helps, urllib's text does not."""
 
         self.app.service = _StubRemote([self._game()])
         self.app._connected = False
@@ -697,7 +700,7 @@ class RemoteModeTests(unittest.TestCase):
         self.assertNotIn("urlopen", text)
 
     def test_subtitle_shows_phone_status_in_remote_mode(self) -> None:
-        """Pelinjohtajan on tiedettävä kenen tiedot hän kirjaa itse."""
+        """The game master must know whose data they are entering themselves."""
 
         class Claiming(_StubRemote):
             def claims(self):
@@ -726,7 +729,7 @@ class RemoteModeTests(unittest.TestCase):
         self.assertNotIn("phone", subtitle)
 
     def test_poll_redraws_the_summary_when_someone_joins(self) -> None:
-        """Liittyminen ei muuta state_versionia, joten se on herätettävä erikseen."""
+        """Joining does not change state_version, so it must be triggered separately."""
 
         class Joining(_StubRemote):
             def __init__(self, snapshots):
@@ -741,11 +744,11 @@ class RemoteModeTests(unittest.TestCase):
         redraws = []
         self.app._refresh_all = lambda: None
         self.app._refresh_summary = lambda: redraws.append(True)
-        self.app.summary_tab = object()   # riittää hasattr-tarkistukseen
+        self.app.summary_tab = object()   # enough for the hasattr check
 
         self.app._poll()
         self.root.after_cancel(self.app._poll_job)
-        self.assertEqual(redraws, [True])   # ensimmäinen näkemä tila
+        self.assertEqual(redraws, [True])   # the first state it sees
 
         self.app._poll()
         self.root.after_cancel(self.app._poll_job)
@@ -757,7 +760,7 @@ class RemoteModeTests(unittest.TestCase):
         self.assertEqual(len(redraws), 2)
 
     def test_poll_mirrors_new_state_to_disk(self) -> None:
-        """Peili on se, mikä tekee varatilasta hyödyllisen."""
+        """The mirror is what makes the fallback useful."""
 
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.dict(
@@ -790,7 +793,7 @@ class RemoteModeTests(unittest.TestCase):
                 self.assertFalse(self.app._mirror_path().is_file())
 
     def test_offline_offer_preselects_the_mirror_but_still_asks(self) -> None:
-        """Ohjelma ei saa päättää käyttäjän puolesta mitä peliä jatketaan."""
+        """The program must not decide for the user which game is continued."""
 
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.dict(
@@ -866,7 +869,7 @@ class RemoteModeTests(unittest.TestCase):
         self.assertEqual(self.app.game.state_version, 9)
 
     def test_lobby_visible_survives_a_destroyed_notebook(self) -> None:
-        """`_poll` osuu ajastimena myös hetkeen jolloin näkymä on juuri purettu."""
+        """`_poll` fires on its timer even just after the view was torn down."""
 
         frame = tk.Frame(self.root)
         notebook = ttk_notebook = __import__(
@@ -901,10 +904,10 @@ class RemoteModeTests(unittest.TestCase):
 
 
 class DestinationBannerTests(unittest.TestCase):
-    """Käynnistysnäkymien on kerrottava mihin peli tallentuu.
+    """The startup views have to say where the game will be saved.
 
-    Ilman tätä uuden pelin velho näyttää samalta riippumatta siitä päätyykö peli
-    koneelle vai palvelimelle.
+    Without this the new-game wizard looks the same whether the game ends up on
+    this machine or on the server.
     """
 
     def setUp(self) -> None:
@@ -956,7 +959,7 @@ class DestinationBannerTests(unittest.TestCase):
     def test_remote_wizard_names_the_server_and_hides_the_name_field(
         self,
     ) -> None:
-        """Etätilassa nimi jäisi käyttämättä, joten sitä ei kysytä."""
+        """In remote mode the name would go unused, so it is not asked for."""
 
         self.app.service = RemoteGameService("https://example.test", "tok")
         wizard = ui_module.NewGameWizard(
@@ -972,13 +975,13 @@ class DestinationBannerTests(unittest.TestCase):
             self.assertIn("REMOTE GAME", banners[0])
             self.assertIn("https://example.test", banners[0])
             self.assertFalse(wizard.ask_name)
-            # Nimeä ei kysytä eikä keksitä: peli menee palvelimelle.
+            # The name is neither asked for nor invented: the game goes to the server.
             self.assertEqual(wizard.save_name.get(), "")
         finally:
             wizard.destroy()
 
     def test_dialog_preselects_the_requested_save(self) -> None:
-        """Peili esivalitaan, mutta muut tallennukset ovat yhä valittavissa."""
+        """The mirror is preselected, but the other saves remain choosable."""
 
         from src.storage import SavedGame
 
@@ -1004,7 +1007,7 @@ class DestinationBannerTests(unittest.TestCase):
         self.root.update_idletasks()
         try:
             self.assertEqual(dialog.tree.selection(), ("1",))
-            # Muut vaihtoehdot ovat yhä listassa.
+            # The other options are still in the list.
             self.assertEqual(len(dialog.tree.get_children()), 3)
         finally:
             dialog.destroy()
@@ -1034,10 +1037,10 @@ class DestinationBannerTests(unittest.TestCase):
             dialog.destroy()
 
     def test_remote_wizard_ignores_local_save_names(self) -> None:
-        """Peilikopio `palvelinpeli.json` ei saa estää uuden pelin luomista.
+        """The mirror `palvelinpeli.json` must not block creating a new game.
 
-        Etätilassa nimeä ei kysytä, joten paikallisten tallennusten
-        nimitörmäystarkistus ei koske sitä lainkaan.
+        In remote mode no name is asked for, so the local saves' name-collision
+        check does not apply to it at all.
         """
 
         from src.storage import save_game, save_path_for_name
@@ -1114,7 +1117,7 @@ class DestinationBannerTests(unittest.TestCase):
 
 
 class LobbyTests(unittest.TestCase):
-    """Aula on ainoa reitti paikan vapauttamiseen, joten se on oltava oikein."""
+    """The lobby is the only route to releasing a seat, so it has to be right."""
 
     class _Stub(RemoteGameService):
         def __init__(self, status) -> None:
@@ -1206,7 +1209,7 @@ class LobbyTests(unittest.TestCase):
         self.assertIn("1 of 2 players have joined", shown)
 
     def test_admin_code_is_not_on_the_television_by_default(self) -> None:
-        """Aula on koko pelin ajan näkyvissä; paljas koodi olisi kaikkien."""
+        """The lobby is on screen all game; a bare code would be everyone's."""
 
         service = self._Stub(self.status)
         self._build(service)
@@ -1223,7 +1226,7 @@ class LobbyTests(unittest.TestCase):
         self.assertIn("K9MRT", self._labels(self.app.lobby_tab))
 
     def test_lobby_marks_who_can_edit_every_row(self) -> None:
-        """Pelinjohtajan ei pidä joutua muistamaan kenelle antoi koodin."""
+        """The game master should not have to remember who they gave the code to."""
 
         self.status["players"][1]["elevated"] = True
         self._build(self._Stub(self.status))
@@ -1233,7 +1236,7 @@ class LobbyTests(unittest.TestCase):
         self.assertIn("edits all rows", self._labels(self.app.lobby_tab))
 
     def test_lobby_redraws_when_an_elevation_appears(self) -> None:
-        """Allekirjoituksen on lueteltava kaikki mitä paneeli piirtää."""
+        """The signature has to list everything the panel renders."""
 
         service = self._Stub(self.status)
         self._build(service)
@@ -1248,7 +1251,7 @@ class LobbyTests(unittest.TestCase):
         self.assertIn("edits all rows", self._labels(self.app.lobby_tab))
 
     def test_unchanged_status_is_not_redrawn(self) -> None:
-        """Kysely käy parin sekunnin välein; joka kerta piirtäminen välkkyisi."""
+        """The poll runs every couple of seconds; redrawing each time would flicker."""
 
         service = self._Stub(self.status)
         self._build(service)

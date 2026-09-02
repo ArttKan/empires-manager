@@ -1,4 +1,4 @@
-"""Basic A.S.T. -vaatimusten tarkistus."""
+"""Checking the Basic A.S.T. requirements."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def meets_basic_ast_requirement(
     player: PlayerState,
     era_index: int,
 ) -> bool:
-    """Tarkista, täyttääkö pelaaja Basic-version aikakausivaatimuksen."""
+    """Check whether the player meets the Basic version's era requirement."""
 
     requirement = BASIC_AST_REQUIREMENTS[era_index]
     if player.cities < requirement.minimum_cities:
@@ -77,10 +77,10 @@ def ast_marker_state(
     player_count: int | None = None,
     game_mode: str | None = None,
 ) -> str:
-    """Palauta READY, BLOCKED, WARNING tai FINISHED markkeria varten.
+    """Return READY, BLOCKED, WARNING or FINISHED for the marker.
 
-    WARNING tarkoittaa, etteivät nykyisen aikakauden vaatimukset enää täyty.
-    Basic-pelissä tämä ei itsessään siirrä markkeria taaksepäin.
+    WARNING means the current era's requirements are no longer met. In the
+    Basic game that alone does not move the marker backwards.
     """
 
     current_era = ast_era_index(

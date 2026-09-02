@@ -176,7 +176,7 @@ class SaveFormatMigrationTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
-    """Palvelin lukee vain yhtä tiedostoa, joten korvaaminen hävittäisi pelin."""
+    """The server reads one file only, so overwriting would destroy the game."""
 
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()
@@ -210,7 +210,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(restored.players[0].cities, 5)
 
     def test_command_log_follows_its_game(self) -> None:
-        """Muuten uusi peli jatkaisi edellisen tarkastusjälkeä."""
+        """Otherwise a new game would continue the previous audit trail."""
 
         self._write_game(5)
         log = self.path.with_suffix(".jsonl")

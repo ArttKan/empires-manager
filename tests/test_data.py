@@ -167,12 +167,12 @@ class DataTests(unittest.TestCase):
         )
 
     def test_a_bands_colours_are_all_colours_it_credits(self) -> None:
-        """Kortin väriraita kertoo mistä altaasta sen alennus otetaan.
+        """A card's colour band says which pool its discount comes from.
 
-        Raita ja krediitit ovat eri asioita, mutta yhdenkään kortin raidassa ei
-        ole väriä johon se ei itse anna krediittiä. Written Record oli merkitty
-        ART+CIVIC vaikka se antaa CIVIC ja SCIENCE — ainoa poikkeus 51:stä, ja
-        siksi virhe eikä sääntö. Tämä testi löytää seuraavan samanlaisen.
+        The band and the credits are different things, but no card's band names
+        a colour it does not itself credit. Written Record was marked ART+CIVIC
+        while crediting CIVIC and SCIENCE — the only exception among 51, and so
+        a mistake rather than a rule. This test finds the next one like it.
         """
 
         for advance in ADVANCES:
@@ -185,17 +185,17 @@ class DataTests(unittest.TestCase):
                 )
 
     def test_written_record_is_civic_and_science(self) -> None:
-        """Punainen ja vihreä, referenssitaulukon mukaan.
+        """Red and green, per the reference sheet.
 
-        Väärä raita ei näy mitenkään ennen kuin joku laskee hintaa: alennus
-        otettiin ART-altaasta, jota kortti ei edes kartuta.
+        A wrong band shows up nowhere until someone works out a price: the
+        discount was taken from the ART pool, which the card does not even fill.
         """
 
         written_record = ADVANCE_BY_ID["written_record"]
 
         self.assertEqual(written_record.groups, ("CIVIC", "SCIENCE"))
-        # Rivi on osa ketjua Written Record -> Cartography -> Library, jotka
-        # molemmat ovat SCIENCE — järjestystä ei saa muuttaa korjatessa.
+        # The row is part of the chain Written Record -> Cartography -> Library,
+        # both of which are SCIENCE — the order must not change when fixing this.
         self.assertIn(
             ("written_record", "cartography", "library"), ADVANCE_CHAINS
         )

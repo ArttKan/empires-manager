@@ -1,23 +1,23 @@
-"""Pelaajakohtaiset tokenit ja niiden liittymisvirta.
+"""Per-player tokens and the join flow.
 
-Tokenit pidetään erillään `GameState`:sta tarkoituksella. Pelitila
-serialisoidaan tallennuksiin, komentolokin viereen ja kannettavan peilikopioon;
-jos tokenit olisivat siinä, jokaisen pelaajan salaisuus vuotaisi kaikkiin noihin
-paikkoihin. Tämä tiedosto on vain palvelimella.
+The tokens are kept out of `GameState` deliberately. Game state is serialised
+into saves, next to the command log and into the laptop's mirror copy; if the
+tokens were in it, every player's secret would leak into all of those places.
+This file exists only on the server.
 
-Oikeusmalli on tahallaan karkea, koska peliporukka on pieni ja tuttu:
+The permission model is deliberately coarse, because the group is small and
+known to each other:
 
-* **admin** — kannettava. Saa tehdä kaiken.
-* **player** — puhelin. Saa muuttaa vain oman sivilisaationsa kaupunkeja,
-  Censusta ja Advance-kortteja. A.S.T.-askel, bonus, kierros ja uusi peli ovat
-  vain adminille.
-* **elevated player** — puhelin, joka liittyi myös admin-koodilla. Varaa oman
-  paikkansa tavalliseen tapaan, mutta saa muuttaa noita samoja kolmea kenttää
-  kenen tahansa riviltä, ja ohittaa vaiheportit kuten kannettava. A.S.T. ja
-  kierros pysyvät silti kannettavalla: korotus on pelinjohtajan apuväline
-  naapurin rivin korjaamiseen, ei toinen täysi admin.
+* **admin** — the laptop. May do anything.
+* **player** — a phone. May change only its own civilization's cities, Census
+  and Advances. A.S.T. step, bonus, turn and new game are admin-only.
+* **elevated player** — a phone that joined with the admin code as well. Claims
+  its own seat normally, but may change those same three fields on anyone's
+  row, and bypasses the phase gates as the laptop does. A.S.T. and the turn
+  still stay on the laptop: elevation is the game master's tool for fixing a
+  neighbour's row, not a second full admin.
 
-Vain vakiokirjastoa.
+Standard library only.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-# Liittymiskoodi luetaan ääneen pöydässä, joten siitä jätetään pois merkit jotka
-# sekoittuvat puheessa tai näytöllä (0/O, 1/I/L).
+# The join code is read aloud at the table, so characters that are confused in
+# speech or on screen are left out (0/O, 1/I/L).
 _JOIN_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 JOIN_CODE_LENGTH = 5
 TOKEN_BYTES = 16
@@ -38,8 +38,8 @@ TOKENS_FILENAME = "tokens.json"
 ADMIN = "admin"
 PLAYER = "player"
 
-# Reitit, joita puhelin saa kutsua. A.S.T.-askel puuttuu tästä tarkoituksella:
-# se on pelin lopputuloksen kannalta ratkaiseva ja jää kannettavalle.
+# The routes a phone may call. The A.S.T. step is deliberately absent: it
+# decides the outcome of the game and stays on the laptop.
 PLAYER_COMMANDS = frozenset({"cities", "census", "advances"})
 
 
@@ -47,9 +47,9 @@ PLAYER_COMMANDS = frozenset({"cities", "census", "advances"})
 class Principal:
     kind: str
     civilization: str = ""
-    # Korotettu pelaaja: oma paikka varattuna, mutta kirjoitusoikeus kaikkien
-    # riveille. Ei tee tästä adminia — `is_admin` ratkaisee yhä A.S.T.:n,
-    # kierroksen, uuden pelin ja aulan.
+    # An elevated player: own seat claimed, but write access to everyone's rows.
+    # This does not make them an admin — `is_admin` still decides the A.S.T., the
+    # turn, a new game and the lobby.
     elevated: bool = False
 
     @property
@@ -58,11 +58,11 @@ class Principal:
 
     @property
     def bypasses_gates(self) -> bool:
-        """Saako vaiheportit ja korttien pysyvyyden ohittaa.
+        """Whether the phase gates and card permanence may be bypassed.
 
-        Korotettu puhelin saa, koska korotuksen koko tarkoitus on korjata
-        toisen rivi silloin kun se on väärin — ja väärin se huomataan yleensä
-        vasta kun vaihe on jo vaihtunut.
+        An elevated phone may, because the whole point of elevation is to fix
+        someone else's row when it is wrong — and wrong is usually noticed only
+        once the phase has already moved on.
         """
 
         return self.is_admin or self.elevated
@@ -80,13 +80,13 @@ def tokens_path(directory: Path) -> Path:
 
 
 class TokenStore:
-    """Sivilisaatiokohtaiset tokenit ja liittymisen tila."""
+    """The per-civilization tokens and the state of joining."""
 
     def __init__(self, path: Path, data: dict) -> None:
         self.path = path
         self._data = data
 
-    # -- luonti ja lataus ---------------------------------------------------
+    # -- creation and loading -----------------------------------------------
 
     @staticmethod
     def _code() -> str:
@@ -98,8 +98,8 @@ class TokenStore:
     def create(cls, civilizations, path: Path) -> "TokenStore":
         join_code = cls._code()
         admin_code = cls._code()
-        # Kahden saman koodin osuminen on epätodennäköistä mutta ei mahdotonta,
-        # ja silloin jokainen liittyjä olisi vahingossa korotettu.
+        # Drawing the same code twice is unlikely but not impossible, and then every
+        # player joining would be elevated by accident.
         while admin_code == join_code:
             admin_code = cls._code()
         data = {
@@ -135,11 +135,11 @@ class TokenStore:
             json.dumps(self._data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        # Tokenit ovat salaisuuksia: vain omistaja saa lukea.
+        # The tokens are secrets: owner-read only.
         temporary.chmod(0o600)
         temporary.replace(self.path)
 
-    # -- kyselyt ------------------------------------------------------------
+    # -- queries ------------------------------------------------------------
 
     @property
     def join_code(self) -> str:
@@ -153,11 +153,11 @@ class TokenStore:
         return str(self._data.get("admin_code", ""))
 
     def code_kind(self, code: str) -> str:
-        """Kumpi koodi annettiin: ADMIN, PLAYER, vai "" jos kumpikaan.
+        """Which code was given: ADMIN, PLAYER, or "" for neither.
 
-        Koodeja on kaksi mutta kenttä yksi: pöydässä sanotaan yksi merkkijono
-        eikä selitetä mihin kahdesta kentästä se kuuluu. Korotus seuraa siitä
-        kumman koodin liittyjä tiesi.
+        There are two codes but one field: at the table one string is spoken,
+        with no explaining which of two boxes it belongs in. Elevation follows
+        from which code the joiner knew.
         """
 
         wanted = code.strip().upper()
@@ -178,17 +178,17 @@ class TokenStore:
         return bool(entry and entry.get("claimed_at"))
 
     def status(self) -> tuple:
-        """(sivilisaatio, varattu) jokaisesta pelaajasta, järjestyksessä."""
+        """(civilization, claimed) for every player, in order."""
 
         return tuple(
             (name, self.is_claimed(name)) for name in self.civilizations()
         )
 
     def principal_for(self, token: str, admin_token: str) -> Principal | None:
-        """Tunnista token. Palauta None jos se ei kelpaa.
+        """Identify a token. Return None if it is not valid.
 
-        Vertailu tehdään `compare_digest`illä, jotta vastausaika ei paljasta
-        kuinka pitkälle token osui oikein.
+        The comparison uses `compare_digest` so the response time does not
+        reveal how far into the token the guess was correct.
         """
 
         if not token:
@@ -203,17 +203,18 @@ class TokenStore:
                 )
         return None
 
-    # -- liittyminen ---------------------------------------------------------
+    # -- joining -------------------------------------------------------------
 
     def claim(self, join_code: str, civilization: str, when: str) -> str:
-        """Varaa sivilisaatio ja palauta sen token.
+        """Claim a civilization and return its token.
 
-        Nostaa ValueErrorin jos koodi on väärä, sivilisaatiota ei ole tai se on
-        jo varattu. Kertaalleen varattua ei voi napata toiselta ilman adminin
-        vapautusta — se estää sen että kaksi pelaajaa päätyy samaan riviin.
+        Raises ValueError if the code is wrong, the civilization does not exist
+        or it is already claimed. A claimed seat cannot be taken from someone
+        without an admin release — that is what stops two players ending up on
+        the same row.
 
-        Kelpaa kumpi tahansa kahdesta koodista. Admin-koodilla varattu paikka
-        merkitään korotetuksi; liittyminen itsessään menee samaa reittiä.
+        Either of the two codes is accepted. A seat claimed with the admin code
+        is marked elevated; joining itself takes the same path.
         """
 
         kind = self.code_kind(join_code)
@@ -230,13 +231,13 @@ class TokenStore:
         return str(entry["token"])
 
     def release(self, civilization: str) -> None:
-        """Vapauta varaus, esimerkiksi kun puhelin vaihtuu."""
+        """Release a claim, for instance when a phone is swapped."""
 
         entry = self._data.get("players", {}).get(civilization)
         if entry is None:
             raise ValueError(f"{civilization} is not in this game.")
         entry["claimed_at"] = None
-        # Vapautus on myös ainoa tapa perua korotus: paikka palaa täysin
-        # tyhjäksi, ja seuraava liittyjä saa vain sen mitä koodillaan ansaitsee.
+        # Releasing is also the only way to cancel elevation: the seat returns to
+        # fully empty, and the next joiner gets only what their code earns them.
         entry["elevated"] = False
         self.save()

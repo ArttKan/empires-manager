@@ -1,8 +1,8 @@
-"""HTTP-kerroksen testit.
+"""Tests for the HTTP layer.
 
-Moduuli ohittaa itsensä jos fastapi puuttuu, samoin kuin test_ui.py tekee
-tkinterin kanssa. Kehityskoneella ei välttämättä ole venviä; palvelimella on,
-joten deploy-skriptin testiportti ajaa nämä ennen uudelleenkäynnistystä.
+The module skips itself if fastapi is missing, just as test_ui.py does with
+tkinter. A dev machine may not have the venv; the server does, so the deploy
+script's test gate runs these before restarting.
 """
 
 import asyncio
@@ -14,9 +14,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# TestClient tarvitsee httpx:n, eikä fastapi asenna sitä itse. Puuttuessaan se
-# nostaa RuntimeErrorin eikä ImportErroria, joten se tarkistetaan erikseen —
-# muuten deployn testiportti kaatuisi palvelimella sen sijaan että ohittaisi.
+# TestClient needs httpx, and fastapi does not install it. When missing it
+# raises RuntimeError rather than ImportError, so it is checked separately —
+# otherwise the deploy's test gate would fail on the server instead of skipping.
 for _module in ("fastapi", "httpx"):  # pragma: no cover
     if importlib.util.find_spec(_module) is None:
         raise unittest.SkipTest(f"{_module} is not installed")
@@ -49,10 +49,10 @@ class HttpTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()
 
-        # Ilman tätä `get_service()` putoaisi takaisin `default_save_path()`:iin,
-        # joka kehityskoneella osoittaa repon oikeaan `tallennukset/`-hakemistoon.
-        # Testi lukisi — ja komennon sattuessa kirjoittaisi — kehittäjän omaan
-        # peliin. Ympäristömuuttuja pitää testit omassa hiekkalaatikossaan.
+        # Without this `get_service()` would fall back to `default_save_path()`,
+        # which on a dev machine points at the repo's real `tallennukset/` directory.
+        # The test would read — and on a command, write — the developer's own game.
+        # The environment variable keeps the tests in their own sandbox.
         self._environment = mock.patch.dict(
             os.environ, {DATA_DIRECTORY_VARIABLE: self._directory.name}
         )
@@ -110,7 +110,7 @@ class StateTests(HttpTestCase):
         self.assertEqual(len(body["players"]), 3)
 
     def test_state_includes_derived_scores_and_ranks(self) -> None:
-        """Pisteet tulevat palvelimelta, jottei sääntöjä tarvitse toistaa JS:ssä."""
+        """Scores come from the server, so the rules need not be repeated in JS."""
 
         self.client.post(
             "/players/Hellas/cities", json={"value": 4}, headers=AUTH
@@ -135,7 +135,7 @@ class StateTests(HttpTestCase):
         self.assertEqual(hellas["rank"], 1)
 
     def test_state_carries_component_colours(self) -> None:
-        """Väri tulee pelikomponentista; asiakas ei saa arvata sitä."""
+        """The colour comes from the game component; the client must not guess it."""
 
         players = self.client.get("/state", headers=AUTH).json()["players"]
         by_name = {p["civilization"]: p for p in players}
@@ -256,7 +256,7 @@ class CommandTests(HttpTestCase):
 
 
 class _StubRequest:
-    """Riittävä osa Requestista event_streamille."""
+    """Just enough of a Request for event_stream."""
 
     def __init__(self, disconnect_after: int = 1000) -> None:
         self._calls = 0
@@ -269,7 +269,7 @@ class _StubRequest:
 
 class PlayerAppTests(HttpTestCase):
     def test_root_serves_the_player_page_without_a_token(self) -> None:
-        """Sivu itsessään ei ole salaisuus; tokenit ovat."""
+        """The page itself is not a secret; the tokens are."""
 
         response = self.client.get("/")
 
@@ -278,18 +278,18 @@ class PlayerAppTests(HttpTestCase):
         self.assertIn("Mega Empires", response.text)
 
     def test_page_is_never_cached(self) -> None:
-        """Sovellus on yksi versioimaton tiedosto: välimuisti jäädyttäisi sen."""
+        """The app is one unversioned file: caching would freeze it."""
 
         response = self.client.get("/")
 
         self.assertIn("no-store", response.headers.get("cache-control", ""))
 
     def test_page_avoids_ad_blocker_prefixes(self) -> None:
-        """Geneeriset mainossäännöt piilottavat nämä alkuiset id:t ja luokat.
+        """Generic ad-blocking rules hide ids and classes with these prefixes.
 
-        Elementit ovat silloin palvellussa HTML:ssä ja jäsennetyssä DOMissa,
-        mutta näkymättömiä puhelimessa eivätkä löydy edes selaimen haulla —
-        vika näyttää siltä kuin koodia ei olisi lainkaan.
+        The elements are then present in the served HTML and in the parsed DOM,
+        but invisible on the phone and not even findable with the browser's
+        search — the fault looks as though the code were never there.
         """
 
         text = self.client.get("/").text
@@ -299,7 +299,7 @@ class PlayerAppTests(HttpTestCase):
                 self.assertNotIn(f'{attribute}="{prefix}', text, prefix)
 
     def test_page_has_one_code_field_and_the_wrong_row_banner(self) -> None:
-        """Koodikenttiä on yksi; kumpi koodi annettiin, ratkeaa palvelimella."""
+        """There is one code field; which code was given is decided on the server."""
 
         text = self.client.get("/").text
 
@@ -307,15 +307,15 @@ class PlayerAppTests(HttpTestCase):
         self.assertNotIn('id="code-admin"', text)
         # Kertoo kumpi koodi kelpasi, ennen paikan varaamista.
         self.assertIn('id="seat-role"', text)
-        # Kertoo että näkyvissä on toisen rivi. Ilman sitä korotettu puhelin
-        # näyttää täsmälleen tavalliselta.
+        # Says that someone else's row is showing. Without it an elevated phone looks
+        # exactly like an ordinary one.
         self.assertIn('id="other"', text)
 
     def test_hidden_beats_any_id_rule(self) -> None:
-        """Piilotus on apuluokka; id-sääntö voittaisi sen tarkkuudessa.
+        """Hiding is a utility class; an id rule would beat it on specificity.
 
-        `#other` asettaa `display: flex`, joten ilman `!important`ia nauha jäi
-        pysyvästi näkyviin vaikka luokka vaihtui DOMissa oikein.
+        `#other` sets `display: flex`, so without `!important` the banner stayed
+        permanently visible even though the class toggled correctly in the DOM.
         """
 
         text = self.client.get("/").text
@@ -323,11 +323,11 @@ class PlayerAppTests(HttpTestCase):
         self.assertIn(".hidden { display: none !important; }", text)
 
     def test_a_card_shows_every_colour_of_its_band(self) -> None:
-        """Kaksivärisen kortin alennus tulee kummasta tahansa altaasta.
+        """A two-colour card's discount comes from either of its pools.
 
-        Raita piirrettiin ennen `groups[0]`:sta, jolloin yhdeksän korttia
-        näytti yksivärisiltä ja kertoi itsestään puolet. Raita on siksi oma
-        elementtinsä eikä reunaviiva: reunalla voi olla vain yksi väri.
+        The stripe used to be drawn from `groups[0]`, so nine cards looked
+        single-coloured and told half their own story. The stripe is therefore
+        an element of its own, not a border: a border can carry only one colour.
         """
 
         text = self.client.get("/").text
@@ -343,7 +343,7 @@ class PlayerAppTests(HttpTestCase):
 
 
 class AdvanceCatalogueTests(HttpTestCase):
-    """Hinnat lasketaan palvelimella, jottei credits.py:tä toisteta JS:ssä."""
+    """Prices are computed on the server, so credits.py is not repeated in JS."""
 
     def test_catalogue_lists_every_advance(self) -> None:
         body = self.client.get(
@@ -376,15 +376,15 @@ class AdvanceCatalogueTests(HttpTestCase):
         self.assertEqual(owned, {"pottery", "masonry"})
 
     def test_colour_credits_lower_the_effective_price(self) -> None:
-        """Ostettu kortti antaa värikrediittiä, joka näkyy hinnoissa."""
+        """A bought card grants colour credit, which shows in the prices."""
 
         catalogue = self.client.get(
             "/players/Hellas/advances", headers=AUTH
         ).json()
         before = {a["id"]: a["effective_cost"] for a in catalogue["advances"]}
 
-        # Pottery antaa CRAFT 10 / ART 5, mutta vasta seuraavalla kierroksella:
-        # saman kierroksen ostot eivät alenna toisiaan.
+        # Pottery grants CRAFT 10 / ART 5, but only from the next turn on:
+        # same-turn purchases do not discount each other.
         self.client.post(
             "/players/Hellas/advances",
             json={"advances": ["pottery"]},
@@ -398,16 +398,16 @@ class AdvanceCatalogueTests(HttpTestCase):
         ).json()
         after = {a["id"]: a["effective_cost"] for a in catalogue["advances"]}
 
-        # 3 pelaajan pelissä alkukrediitti on 10 per väri, ja Pottery tuo
-        # CRAFTiin 10 lisää. Endpoint laskee siis myös alkukrediitit mukaan.
+        # In a 3-player game the starting credit is 10 per colour, and Pottery adds
+        # 10 more to CRAFT. The endpoint therefore counts the starting credits too.
         self.assertEqual(catalogue["credits"]["CRAFT"], 20)
         self.assertEqual(catalogue["credits"]["ART"], 15)
-        # Cloth Making on CRAFT, joten sen hinta laski.
+        # Cloth Making is CRAFT, so its price went down.
         self.assertLess(after["cloth_making"], before["cloth_making"])
         self.assertEqual(after["cloth_making"], 30)
 
     def test_row_chain_discount_is_reported_separately(self) -> None:
-        """Referenssirivin 1 VP -> 3 VP antaa 10 lisäalennusta."""
+        """The reference row's 1 VP -> 3 VP grants 10 further discount."""
 
         self.client.post(
             "/players/Hellas/advances",
@@ -426,7 +426,7 @@ class AdvanceCatalogueTests(HttpTestCase):
         self.assertEqual(monument["row_discount"], 10)
 
     def test_same_turn_purchases_do_not_discount_each_other(self) -> None:
-        """Hankintavaihe on yhtäaikainen, myös useassa erässä kirjattuna."""
+        """Acquisition is simultaneous, even when recorded in several batches."""
 
         self.client.post(
             "/turn", json={"round_number": 3, "current_phase": 12}, headers=AUTH
@@ -438,7 +438,7 @@ class AdvanceCatalogueTests(HttpTestCase):
             ).json()["advances"]
         }
 
-        # Ensimmäinen erä: Mysticism (ART 5 / RELIGION 5, ja rivin 1 VP -kortti).
+        # First batch: Mysticism (ART 5 / RELIGION 5, and the row's 1 VP card).
         self.client.post(
             "/players/Hellas/advances",
             json={"advances": ["mysticism"]},
@@ -450,11 +450,11 @@ class AdvanceCatalogueTests(HttpTestCase):
         after = {a["id"]: a["effective_cost"] for a in body["advances"]}
         monument = [a for a in body["advances"] if a["id"] == "monument"][0]
 
-        # Toinen erä samalla kierroksella näkee samat hinnat kuin ensimmäinen.
+        # A second batch on the same turn sees the same prices as the first.
         self.assertEqual(after["monument"], before["monument"])
         self.assertEqual(monument["row_discount"], 0)
-        # 3 pelaajan alkukrediitti on 10 per väri; Mysticismin RELIGION 5 ei
-        # vielä näy, koska se ostettiin tällä kierroksella.
+        # The 3-player starting credit is 10 per colour; Mysticism's RELIGION 5 does
+        # not show yet, because it was bought on this turn.
         self.assertEqual(body["credits"]["RELIGION"], 10)
 
         # Seuraavalla kierroksella alennus alkaa vaikuttaa.
@@ -503,7 +503,7 @@ class AdvanceCatalogueTests(HttpTestCase):
 
 
 class PermanentAdvanceTests(HttpTestCase):
-    """Aiemman kierroksen kortti on ostettu; sitä ei voi perua puhelimelta."""
+    """An earlier turn's card is bought; it cannot be undone from a phone."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -515,7 +515,7 @@ class PermanentAdvanceTests(HttpTestCase):
             "Authorization": "Bearer "
             + store.claim(store.join_code, "Hellas", "now")
         }
-        # Kierros 1: osta Mysticism. Kierros 2: se on pysyvä.
+        # Turn 1: buy Mysticism. Turn 2: it is permanent.
         self.client.post(
             "/turn", json={"round_number": 1, "current_phase": 12}, headers=AUTH
         )
@@ -537,10 +537,11 @@ class PermanentAdvanceTests(HttpTestCase):
         self.assertEqual(locked, {"mysticism"})
 
     def test_catalogue_separates_this_turn_from_earlier_turns(self) -> None:
-        """Ryhmittely tarvitsee ostohetken, ei lukitusta.
+        """Grouping needs the purchase turn, not the lock.
 
-        `locked` kertoo vain saako kortin perua, ja korotetulla puhelimella se
-        on aina tyhjä — silloin kaikki ostetut valuisivat samaan ryhmään.
+        `locked` says only whether a card may be undone, and on an elevated
+        phone it is always empty — every owned card would then fall into one
+        group.
         """
 
         self.client.post(
@@ -557,7 +558,7 @@ class PermanentAdvanceTests(HttpTestCase):
         # Mysticism on kierrokselta 1, Pottery juuri ostettu kierroksella 2.
         self.assertFalse(by_id["mysticism"]["this_turn"])
         self.assertTrue(by_id["pottery"]["this_turn"])
-        # Ostamaton kortti ei ole kummassakaan ryhmässä.
+        # An unbought card is in neither group.
         self.assertFalse(by_id["monument"]["this_turn"])
         self.assertFalse(by_id["monument"]["owned"])
 
@@ -584,7 +585,7 @@ class PermanentAdvanceTests(HttpTestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_player_may_undo_a_card_bought_this_turn(self) -> None:
-        """Näppäilyvirheen on voitava korjata saman vaiheen aikana."""
+        """A mistyped entry must be fixable within the same phase."""
 
         self.client.post(
             "/players/Hellas/advances",
@@ -609,7 +610,7 @@ class PermanentAdvanceTests(HttpTestCase):
 
 
 class ScopeTests(HttpTestCase):
-    """Puhelin saa muuttaa vain omaa riviään ja vain sovituilla komennoilla."""
+    """A phone may change only its own row, and only with the agreed commands."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -622,7 +623,7 @@ class ScopeTests(HttpTestCase):
         self.player = {"Authorization": f"Bearer {self.hellas}"}
 
     def test_player_may_change_their_own_row(self) -> None:
-        # Census ja advances ovat vaihesidonnaisia; kaupungit eivät.
+        # Census and advances are phase-gated; cities are not.
         for phase, route, body in (
             (1, "cities", {"value": 4}),
             (2, "census", {"value": 20}),
@@ -639,7 +640,7 @@ class ScopeTests(HttpTestCase):
             self.assertEqual(response.status_code, 200, route)
 
     def test_advances_are_editable_only_in_phase_twelve(self) -> None:
-        """Koko korttivalikoima kirjoitetaan kerralla, joten väärä vaihe pyyhkisi kortit."""
+        """The whole card set is written at once, so a wrong phase would wipe them."""
 
         allowed = []
         for phase in range(1, 14):
@@ -658,7 +659,7 @@ class ScopeTests(HttpTestCase):
         self.assertEqual(allowed, [12])
 
     def test_cities_stay_editable_in_every_phase(self) -> None:
-        """Kaupunkimäärä muuttuu myös konflikteissa ja calamityissä."""
+        """The city count also changes through conflict and calamities."""
 
         for phase in range(1, 14):
             self.client.post(
@@ -759,7 +760,7 @@ class ScopeTests(HttpTestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        # Mitään ei saanut muuttua.
+        # Nothing was allowed to change.
         state = self.client.get("/state", headers=AUTH).json()
         minoa = [p for p in state["players"] if p["civilization"] == "Minoa"][0]
         self.assertEqual(minoa["cities"], 0)
@@ -795,7 +796,7 @@ class ScopeTests(HttpTestCase):
             self.assertEqual(response.status_code, 403, path)
 
     def test_player_may_read_the_whole_state(self) -> None:
-        """Avoimen informaation peli: pistetilanne on TV:llä joka tapauksessa."""
+        """A game of open information: the score is on the TV anyway."""
 
         response = self.client.get("/state", headers=self.player)
 
@@ -823,7 +824,7 @@ class ScopeTests(HttpTestCase):
             )
 
     def test_new_game_mints_new_tokens(self) -> None:
-        """Vanha puhelintoken ei saa jäädä voimaan uuteen peliin."""
+        """An old phone token must not stay valid into a new game."""
 
         before = self.store.join_code
         payload = GameState(
@@ -882,7 +883,7 @@ class JoinFlowTests(HttpTestCase):
         self.assertEqual(colours["Minoa"], "#70b62c")
 
     def test_roster_shows_the_setup_nickname(self) -> None:
-        """Nimi on vahvin tunniste juuri siinä hetkessä kun paikka valitaan."""
+        """The name is the strongest identifier at the moment a seat is chosen."""
 
         self.client.post(
             "/players/Hellas/details",
@@ -946,7 +947,7 @@ class JoinFlowTests(HttpTestCase):
         self.assertFalse(main.get_token_store().is_claimed("Hellas"))
 
     def test_repeated_wrong_codes_are_rate_limited(self) -> None:
-        """Lyhyt koodi kestää arvailua vain jos yrityksiä rajoitetaan."""
+        """A short code withstands guessing only if the attempts are limited."""
 
         codes = [
             self.client.post("/join/roster", json={"code": "NOPE"}).status_code
@@ -1009,7 +1010,7 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(body["civilization"], "Hatti")
 
     def test_the_roster_takes_either_code_and_says_which(self) -> None:
-        """Yksi kenttä: liittyjän on nähtävä kumman koodin hän näppäili."""
+        """One field: the joiner has to see which code they typed."""
 
         plain = self.client.post(
             "/join/roster", json={"code": self.store.join_code}
@@ -1020,7 +1021,7 @@ class ElevatedPhoneTests(HttpTestCase):
 
         self.assertFalse(plain["elevated"])
         self.assertTrue(admin["elevated"])
-        # Sama lista kummallakin: korotus ei muuta sitä mitä paikkoja on.
+        # The same list either way: elevation does not change which seats exist.
         self.assertEqual(
             [p["civilization"] for p in plain["players"]],
             [p["civilization"] for p in admin["players"]],
@@ -1044,7 +1045,7 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(response.json()["player"]["cities"], 4)
 
     def test_a_plain_phone_still_cannot(self) -> None:
-        """Vertailukohta: korotus on se mikä eron tekee, ei liittyminen."""
+        """The control: elevation is what makes the difference, not joining."""
 
         self._phase(1)
 
@@ -1055,7 +1056,7 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_elevated_phone_bypasses_the_phase_gates(self) -> None:
-        """Naapurin virhe huomataan yleensä vasta vaiheen jo vaihduttua."""
+        """A neighbour's mistake is usually noticed only after the phase has moved."""
 
         self._phase(7)
 
@@ -1092,10 +1093,10 @@ class ElevatedPhoneTests(HttpTestCase):
     def test_the_catalogue_unlocks_earlier_cards_for_an_elevated_phone(
         self,
     ) -> None:
-        """Lukitus on vihje POSTin säännöstä, joten sen on kertova sama asia.
+        """The lock is a hint about the POST rule, so it must say the same thing.
 
-        Muuten lista näyttäisi kortin lukittuna vaikka palvelin ottaisi
-        muutoksen vastaan, ja korjaus näyttäisi mahdottomalta.
+        Otherwise the list would show a card as locked even though the server
+        would accept the change, and the correction would look impossible.
         """
 
         self._phase(12, round_number=1)
@@ -1114,13 +1115,13 @@ class ElevatedPhoneTests(HttpTestCase):
         ).json()
 
         self.assertEqual([a for a in mine["advances"] if a["locked"]], [])
-        # Tavalliselle puhelimelle sama kortti on yhä lukittu.
+        # For an ordinary phone the same card is still locked.
         self.assertEqual(
             {a["id"] for a in theirs["advances"] if a["locked"]}, {"mysticism"}
         )
 
     def test_purchase_turn_survives_the_gate_bypass(self) -> None:
-        """Korotetulla ei ole lukittuja kortteja, mutta ostohetki on silti tosi."""
+        """An elevated phone has no locked cards, but the purchase turn is still real."""
 
         self._phase(12, round_number=1)
         self.client.post(
@@ -1140,14 +1141,14 @@ class ElevatedPhoneTests(HttpTestCase):
         ).json()
         by_id = {a["id"]: a for a in body["advances"]}
 
-        # Mikään ei ole lukittu — ohitus on voimassa …
+        # Nothing is locked — the bypass is in effect ...
         self.assertEqual([a for a in body["advances"] if a["locked"]], [])
-        # … mutta ryhmittely erottaa silti kierrokset toisistaan.
+        # ... but the grouping still tells the turns apart.
         self.assertFalse(by_id["mysticism"]["this_turn"])
         self.assertTrue(by_id["pottery"]["this_turn"])
 
     def test_elevation_stops_at_the_ast_and_the_turn(self) -> None:
-        """Korotus laajentaa rivejä, ei komentoja."""
+        """Elevation widens the rows, not the commands."""
 
         details = {
             "nickname": "Matti",
@@ -1175,7 +1176,7 @@ class ElevatedPhoneTests(HttpTestCase):
         self.assertEqual(turn.status_code, 403)
 
     def test_state_tells_the_phone_that_it_is_elevated(self) -> None:
-        """Puhelin ei voi päätellä korotustaan mistään muualta."""
+        """A phone cannot work out its elevation from anywhere else."""
 
         mine = self.client.get("/state", headers=self.elevated).json()["you"]
         theirs = self.client.get("/state", headers=self.plain).json()["you"]
@@ -1197,9 +1198,9 @@ class ElevatedPhoneTests(HttpTestCase):
             "/players/Minoa/cities", json={"value": 4}, headers=self.elevated
         )
 
-        # 403 eikä 401: token itsessään kelpaa yhä — vapautus vapauttaa paikan
-        # eikä mitätöi tokenia — mutta korotus on poissa, joten toisen rivi ei
-        # enää aukea.
+        # 403 rather than 401: the token itself is still valid — releasing frees the
+        # seat without invalidating the token — but the elevation is gone, so someone
+        # else's row no longer opens.
         self.assertEqual(response.status_code, 403)
 
     def test_lobby_reports_the_admin_code_and_who_is_elevated(self) -> None:
@@ -1242,7 +1243,7 @@ class AdminLobbyTests(HttpTestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_release_lets_the_seat_be_claimed_again(self) -> None:
-        """Puhelimen vaihto ei saa lukita pelaajaa ulos."""
+        """Swapping a phone must not lock a player out."""
 
         self.store.claim(self.store.join_code, "Hellas", "now")
 
@@ -1291,7 +1292,7 @@ class CreateGameTests(HttpTestCase):
         )
 
     def test_create_resets_the_version_counters(self) -> None:
-        """Uusi peli ei saa periä vanhan pelin versiolaskureita."""
+        """A new game must not inherit the old game's version counters."""
 
         self.client.post(
             "/players/Hellas/cities", json={"value": 5}, headers=AUTH
@@ -1307,14 +1308,14 @@ class CreateGameTests(HttpTestCase):
         self.assertEqual(state["players"][0]["version"], 0)
 
     def test_create_archives_the_previous_game(self) -> None:
-        """Uusi peli ei saa hävittää käynnissä olevaa lopullisesti."""
+        """A new game must not destroy a game in progress for good."""
 
         self.client.post(
             "/players/Hellas/cities", json={"value": 6}, headers=AUTH
         )
         directory = Path(self._directory.name)
         live = directory / "nykyinen_peli.json"
-        # Aja komento myös oletuspolkuun, jotta arkistoitavaa on.
+        # Run a command against the default path too, so there is something to archive.
         self.client.post("/game", json=self._payload(), headers=AUTH)
         self.client.post(
             "/players/Saba/cities", json={"value": 3}, headers=AUTH
@@ -1328,7 +1329,7 @@ class CreateGameTests(HttpTestCase):
         previous = json.loads((directory / archived).read_text(encoding="utf-8"))
         saba = [p for p in previous["players"] if p["civilization"] == "Saba"][0]
         self.assertEqual(saba["cities"], 3)
-        # Uusi peli alkaa puhtaalta pöydältä.
+        # A new game starts from a clean slate.
         self.assertEqual(
             json.loads(live.read_text(encoding="utf-8"))["state_version"], 0
         )
@@ -1364,10 +1365,10 @@ class CreateGameTests(HttpTestCase):
 
 
 class EventStreamTests(HttpTestCase):
-    """Virtaa ajetaan generaattorina eikä HTTP-vasteena.
+    """The stream is driven as a generator, not as an HTTP response.
 
-    `/events` ei pääty koskaan, joten TestClientin stream jäisi roikkumaan sen
-    sulkemiseen. Generaattori antaa saman sopimuksen ilman ikuista pyyntöä.
+    `/events` never ends, so TestClient's stream would hang waiting for it to
+    close. The generator gives the same contract without the endless request.
     """
 
     def _collect(self, count: int, before_second=None) -> list:
@@ -1396,7 +1397,7 @@ class EventStreamTests(HttpTestCase):
         self.assertEqual(payload, {"state_version": 1})
 
     def test_stream_carries_no_game_data(self) -> None:
-        """Virta on ilman tokenia, joten siinä ei saa kulkea pelidataa."""
+        """The stream takes no token, so no game data may travel on it."""
 
         self.service.set_player_details(
             "Hellas",

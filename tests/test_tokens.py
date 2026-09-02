@@ -39,7 +39,7 @@ class PermissionTests(unittest.TestCase):
             self.assertTrue(player.may_command("Hellas", command))
 
     def test_ast_step_is_never_available_to_a_player(self) -> None:
-        """A.S.T.-askel on pelin ratkaiseva tieto ja jää kannettavalle."""
+        """The A.S.T. step decides the game and stays on the laptop."""
 
         player = Principal(PLAYER, "Hellas")
 
@@ -48,7 +48,7 @@ class PermissionTests(unittest.TestCase):
 
 
 class ElevatedPlayerTests(unittest.TestCase):
-    """Korotettu pelaaja: oma paikka, mutta kirjoitusoikeus kaikkien riveille."""
+    """An elevated player: own seat, but write access to everyone's rows."""
 
     def test_elevated_player_may_edit_any_row(self) -> None:
         elevated = Principal(PLAYER, "Hellas", elevated=True)
@@ -61,7 +61,7 @@ class ElevatedPlayerTests(unittest.TestCase):
                 )
 
     def test_elevation_widens_the_rows_not_the_commands(self) -> None:
-        """A.S.T. ja kierros jäävät kannettavalle myös korotetulta."""
+        """A.S.T. and the turn stay on the laptop even for an elevated player."""
 
         elevated = Principal(PLAYER, "Hellas", elevated=True)
 
@@ -96,7 +96,7 @@ class TokenStoreTests(unittest.TestCase):
             self.assertGreaterEqual(len(token), 20)
 
     def test_join_code_avoids_ambiguous_characters(self) -> None:
-        """Koodi luetaan ääneen, joten 0/O ja 1/I/L jätetään pois."""
+        """The code is read aloud, so 0/O and 1/I/L are left out."""
 
         self.assertTrue(self.store.join_code)
         for character in self.store.join_code:
@@ -148,7 +148,7 @@ class TokenStoreTests(unittest.TestCase):
             self.store.claim(self.store.join_code, "Atlantis", "now")
 
     def test_release_frees_the_seat_again(self) -> None:
-        """Puhelimen vaihto tai selaimen tyhjennys ei saa lukita pelaajaa ulos."""
+        """A swapped phone or a cleared browser must not lock a player out."""
 
         first = self.store.claim(self.store.join_code, "Saba", "now")
         self.store.release("Saba")
@@ -167,7 +167,7 @@ class TokenStoreTests(unittest.TestCase):
         )
 
     def _wrong_admin_code(self) -> str:
-        """Varmasti väärä koodi — arvattu merkkijono voisi osua oikeaan."""
+        """A definitely wrong code — a guessed string could hit the real one."""
 
         return "".join("A" if c != "A" else "B" for c in self.store.admin_code)
 
@@ -187,12 +187,12 @@ class TokenStoreTests(unittest.TestCase):
         self.assertTrue(self.store.is_elevated("Hellas"))
         principal = self.store.principal_for(token, ADMIN_TOKEN)
         self.assertTrue(principal.elevated)
-        # Korotus ei ole adminius: se ratkaisee yhä A.S.T.:n ja aulan.
+        # Elevation is not admin: that still decides the A.S.T. and the lobby.
         self.assertFalse(principal.is_admin)
         self.assertEqual(principal.civilization, "Hellas")
 
     def test_code_kind_tells_the_two_codes_apart(self) -> None:
-        """Kenttiä on yksi, joten koodi itse ratkaisee mitä siitä seuraa."""
+        """There is one field, so the code itself decides what follows from it."""
 
         self.assertEqual(self.store.code_kind(self.store.join_code), PLAYER)
         self.assertEqual(self.store.code_kind(self.store.admin_code), ADMIN)
@@ -200,7 +200,7 @@ class TokenStoreTests(unittest.TestCase):
         self.assertEqual(self.store.code_kind(""), "")
 
     def test_code_kind_trims_and_ignores_case(self) -> None:
-        """Koodi sanotaan ääneen ja näppäillään puhelimella."""
+        """The code is spoken aloud and typed on a phone."""
 
         self.assertEqual(
             self.store.code_kind("  " + self.store.admin_code.lower() + "  "),
@@ -208,7 +208,7 @@ class TokenStoreTests(unittest.TestCase):
         )
 
     def test_release_also_cancels_the_elevation(self) -> None:
-        """Vapautus on ainoa peruutustapa, joten sen on siivottava kaikki."""
+        """Releasing is the only way to undo, so it has to clear everything."""
 
         self.store.claim(self.store.admin_code, "Hellas", "now")
         self.store.release("Hellas")
@@ -218,10 +218,10 @@ class TokenStoreTests(unittest.TestCase):
         self.assertFalse(self.store.is_elevated("Hellas"))
 
     def test_a_store_from_before_this_feature_still_works(self) -> None:
-        """Kesken pelin päivitetty palvelin: vanhassa tiedostossa ei ole koodia.
+        """A server updated mid-game: the old file has no admin code.
 
-        Tavallisen liittymisen on toimittava, ja korotuksen on kieltäydyttävä
-        sen sijaan että tyhjä koodi kelpaisi mihin tahansa syötteeseen.
+        An ordinary join has to keep working, and elevation has to refuse
+        rather than let an empty code match any input at all.
         """
 
         data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -235,9 +235,9 @@ class TokenStoreTests(unittest.TestCase):
         self.assertTrue(store.claim(store.join_code, "Minoa", "now"))
         self.assertFalse(store.is_elevated("Minoa"))
 
-        # Tyhjä koodi ei saa vastata mihinkään syötteeseen — muuten jokainen
-        # liittyisi korotettuna palvelimella jota ei ole vielä käynnistetty
-        # uudella pelillä.
+        # An empty code must not match any input — otherwise everyone would join
+        # elevated on a server that has not yet been restarted with a new game.
+        #
         self.assertEqual(store.code_kind(""), "")
         self.assertEqual(store.code_kind("ABCDE"), "")
         self.assertFalse(store.is_claimed("Hellas"))

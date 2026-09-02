@@ -1,13 +1,13 @@
-# Sovelluskäyttäjällä megaempires ei ole sudo-oikeuksia. Deploy-skripti tarvitsee
-# kuitenkin yhden asian: tämän yhden palvelun uudelleenkäynnistyksen. Sääntö on
-# rajattu täsmälleen siihen komentoon, ei systemctliin yleisesti.
+# The application account megaempires has no sudo rights. The deploy script does
+# need one thing, however: restarting this one service. The rule is scoped to
+# exactly that command, not to systemctl in general.
 #
-# Asennus (visudo tarkistaa syntaksin ennen tallennusta):
+# Installation (visudo checks the syntax before saving):
 #   sudo install -m 0440 -o root -g root \
 #       deploy/megaempires-deploy.sudoers /etc/sudoers.d/megaempires-deploy
 #   sudo visudo -c
 #
-# Sudo vertaa komentoa merkkijonona, joten deploy.sh kutsuu samaa absoluuttista
-# polkua /usr/bin/systemctl. Tarkista tarvittaessa: command -v systemctl
+# Sudo compares the command as a string, so deploy.sh calls the same absolute
+# path /usr/bin/systemctl. Check with: command -v systemctl
 
 megaempires ALL=(root) NOPASSWD: /usr/bin/systemctl restart mega-empires-backend.service

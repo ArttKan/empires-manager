@@ -1,4 +1,4 @@
-"""Pistelaskenta ja sijoitusten järjestäminen."""
+"""Score calculation and ranking."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _tie_break_key(player: PlayerState) -> tuple[int, ...]:
 
 
 def ranked_players(players: list[PlayerState]) -> list[PlayerState]:
-    """Järjestä pelaajat pisteiden ja käytettävissä olevien tasakriteerien mukaan."""
+    """Order players by score and by whichever tie-breaks are available."""
 
     return sorted(
         players,
@@ -66,7 +66,7 @@ def ranked_players(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def players_in_ast_order(players: list[PlayerState]) -> list[PlayerState]:
-    """Järjestä pelaajat sivilisaatioiden pysyvään A.S.T.-järjestykseen."""
+    """Order players by the civilizations' fixed A.S.T. order."""
 
     return sorted(
         players,
@@ -75,11 +75,11 @@ def players_in_ast_order(players: list[PlayerState]) -> list[PlayerState]:
 
 
 def visible_rankings(players: list[PlayerState]) -> dict[str, int]:
-    """Anna sama sijoitus saman pistemäärän pelaajille.
+    """Give players on the same score the same rank.
 
-    Virallisia credit-tokenien tasakriteerejä ei tallenneta minimiversiossa,
-    joten näkyvä sijoitus perustuu pisteisiin. Rivien keskinäinen järjestys
-    voi silti käyttää saatavilla olevia tasakriteerejä.
+    The official credit-token tie-breaks are not tracked, so the visible rank
+    is based on score alone. The order of the rows themselves may still use
+    whichever tie-breaks are available.
     """
 
     rankings: dict[str, int] = {}

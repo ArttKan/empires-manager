@@ -54,7 +54,7 @@ class CommandTests(unittest.TestCase):
 
         snapshot = service.snapshot()
         self.assertEqual(snapshot.state_version, 2)
-        # Pelaajakohtaiset laskurit ovat toisistaan riippumattomia.
+        # The per-player counters are independent of each other.
         self.assertEqual(
             [player.version for player in snapshot.players if player.version],
             [1, 1],
@@ -69,7 +69,7 @@ class CommandTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.expected, 0)
         self.assertEqual(caught.exception.actual, 1)
-        # Hylätty komento ei saa jättää jälkeä tilaan.
+        # A rejected command must leave no trace in the state.
         snapshot = service.snapshot()
         self.assertEqual(snapshot.players[2].cities, 5)
         self.assertEqual(snapshot.state_version, 1)
@@ -98,7 +98,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(service.set_census("Hellas", -4).player.census, 0)
 
     def test_snapshot_is_a_copy_not_a_live_reference(self) -> None:
-        """Etätoteutus ei voi palauttaa elävää oliota, joten paikallinenkaan ei saa."""
+        """A remote implementation cannot return a live object, so nor may the local one."""
 
         service = LocalGameService(_game())
         snapshot = service.snapshot()
@@ -267,7 +267,7 @@ class WiderCommandTests(unittest.TestCase):
         self.assertEqual(result.player.cities, 6)
         self.assertEqual(result.player.ast_step, 11)
         self.assertEqual(result.player.census, 40)
-        # Kuusi kenttää, yksi käyttäjän teko, yksi versionnosto.
+        # Six fields, one user action, one version bump.
         self.assertEqual(result.player.version, 1)
         self.assertEqual(result.state_version, 1)
 

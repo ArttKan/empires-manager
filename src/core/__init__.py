@@ -1,3 +1,3 @@
-"""Pelin säännöt ja data. Ei tiedä mitään käyttöliittymästä,
-verkosta eikä tallennuksesta — tämä kerros on se, jonka ansiosta
-logiikan voi testata ilman näyttöä ja ilman venviä."""
+"""The rules and the data. Knows nothing of the UI, the network or
+persistence — this layer is what makes the logic testable without a
+display and without the venv."""

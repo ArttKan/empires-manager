@@ -1,20 +1,20 @@
-"""Pelitilan komentorajapinta.
+"""The command interface to the game state.
 
-`GameService` on ainoa asia, joka saa muuttaa `GameState`-oliota. Käyttöliittymä
-ja tuleva HTTP-kerros ovat molemmat sen asiakkaita eivätkä kosketa dataclasseja
-suoraan.
+`GameService` is the only thing allowed to mutate a `GameState`. The UI and the
+HTTP layer are both its clients and never touch the dataclasses directly.
 
-Rajapinta on määritelty niin, että sen voi toteuttaa myös verkon yli:
+The interface is defined so that it can also be implemented over the network:
 
-* komennot ottavat **absoluuttisen arvon**, eivät muutosta. Kaksi rinnakkaista
-  "+1" onnistuisi molemmat ja kaupunkeja tulisi kaksi lisää, vaikka käyttäjä näki
-  vain yhden. Absoluuttinen arvo yhdessä `expected_version`-tarkistuksen kanssa
-  hylkää vanhentuneen kirjoituksen sen sijaan, että se yliajaisi toisen muutoksen;
-* komennot **palauttavat arvon eivätkä viittausta** sisäiseen tilaan. Verkon yli
-  toimiva toteutus ei voi palauttaa elävää oliota, joten paikallinenkaan ei saa.
+* commands take an **absolute value**, not a delta. Two concurrent "+1"s would
+  both succeed and add two cities, though the user only saw one. An absolute
+  value together with the `expected_version` check rejects a stale write
+  instead of letting it overwrite someone else's change;
+* commands **return a value, not a reference** to internal state. An
+  implementation working over the network cannot return a live object, so the
+  local one must not either.
 
-Moduuli on tarkoituksella pelkkää vakiokirjastoa: työpöytäsovelluksen on toimittava
-ilman venviä ja FastAPIa.
+The module is deliberately standard library only: the desktop app has to work
+without the venv and without FastAPI.
 """
 
 from __future__ import annotations
@@ -31,18 +31,18 @@ from .storage import save_game
 
 
 class CommandError(Exception):
-    """Komentoa ei hyväksytty. HTTP-kerros kääntää alaluokat statuskoodeiksi."""
+    """The command was not accepted. The HTTP layer maps subclasses to statuses."""
 
 
 class UnknownPlayer(CommandError):
-    """Sivilisaatiota ei ole tässä pelissä (HTTP 404)."""
+    """No such civilization in this game (HTTP 404)."""
 
 
 class VersionConflict(CommandError):
-    """Asiakkaan tuntema versio on vanhentunut (HTTP 409).
+    """The version the client knows is stale (HTTP 409).
 
-    Asiakkaan pitää hakea tuore tilannekuva ja yrittää uudelleen; komentoa ei
-    saa yrittää uudelleen automaattisesti vanhalla arvolla.
+    The client must fetch a fresh snapshot and try again; the command must
+    never be retried automatically with the old value.
     """
 
     def __init__(self, expected: int, actual: int) -> None:
@@ -54,32 +54,32 @@ class VersionConflict(CommandError):
 
 
 class RuleViolation(CommandError):
-    """Komento rikkoisi pelisääntöä (HTTP 422)."""
+    """The command would break a game rule (HTTP 422)."""
 
 
 class ServiceUnavailable(CommandError):
-    """Palveluun ei saatu yhteyttä, tai sillä ei ole peliä (HTTP 503).
+    """The service could not be reached, or has no game (HTTP 503).
 
-    Erotettu muista siksi, että käyttöliittymän on käyttäydyttävä eri tavalla:
-    hylätty komento on käyttäjän virhe, katkennut yhteys ei ole. Jälkimmäisessä
-    näkymä pidetään ennallaan eikä sitä tulkita pelitilan muutokseksi.
+    Kept separate because the UI has to behave differently: a rejected command
+    is the user's mistake, a dropped connection is not. In the latter case the
+    view is left as it is and never read as a change of game state.
     """
 
 
 @dataclass(frozen=True)
 class CommandResult:
-    """Komennon tulos. `player` on kopio, ei viittaus palvelun tilaan."""
+    """The result of a command. `player` is a copy, not a reference to state."""
 
     state_version: int
     player: PlayerState | None = None
 
 
 class GameService(ABC):
-    """Rajapinta, jonka sekä paikallinen että HTTP-toteutus toteuttavat."""
+    """The interface implemented by both the local and the HTTP versions."""
 
     @abstractmethod
     def snapshot(self) -> GameState:
-        """Palauta koko pelitila kopiona."""
+        """Return the whole game state as a copy."""
 
     @abstractmethod
     def set_cities(
@@ -89,7 +89,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Aseta pelaajan kaupunkimäärä absoluuttisena arvona."""
+        """Set the player's city count as an absolute value."""
 
     @abstractmethod
     def set_census(
@@ -99,7 +99,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Aseta pelaajan Census absoluuttisena arvona."""
+        """Set the player's Census as an absolute value."""
 
     @abstractmethod
     def set_ast_bonus(
@@ -109,7 +109,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Vahvista tai peru A.S.T.-loppubonus."""
+        """Confirm or withdraw the end-game A.S.T. bonus."""
 
     @abstractmethod
     def set_ast_step(
@@ -119,7 +119,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Aseta pelaajan A.S.T.-askel absoluuttisena arvona."""
+        """Set the player's A.S.T. step as an absolute value."""
 
     @abstractmethod
     def set_advances(
@@ -130,7 +130,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Korvaa pelaajan Advance-kortit ja vapaat krediitit."""
+        """Replace the player's Advances and flexible credits."""
 
     @abstractmethod
     def set_player_details(
@@ -145,7 +145,7 @@ class GameService(ABC):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Aseta Details-dialogin kentät yhtenä atomisena komentona."""
+        """Set the Details dialog's fields as one atomic command."""
 
     @abstractmethod
     def set_turn(
@@ -155,7 +155,7 @@ class GameService(ABC):
         expected_state_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Aseta kierros ja vaihe. Pelitason komento, ei pelaajakohtainen."""
+        """Set the turn and phase. A game-level command, not a per-player one."""
 
 
 def validate_ast_bonus(
@@ -163,15 +163,15 @@ def validate_ast_bonus(
     civilization: str,
     granted: bool,
 ) -> None:
-    """Tarkista skenaarion A.S.T.-bonussäännöt.
+    """Check the scenario's A.S.T. bonus rules.
 
-    Tämä oli aiemmin `PlayerDialog._save`-metodissa `ui.py`:ssä, jolloin sääntö
-    ei koskenut mitään muuta asiakasta. Nostaminen tänne on koko Phase B:n idea
-    pienoiskoossa: sääntö kuuluu ytimeen, ei yhteen dialogiin.
+    This used to live in `PlayerDialog._save` in `ui.py`, where the rule
+    applied to no other client. Lifting it here is the whole idea of Phase B in
+    miniature: a rule belongs in the core, not in one dialog.
 
-    Alle 12 pelaajan pelissä bonuksen voi saada vain yksi pelaaja. 12+ pelaajan
-    yhdistelmäpelissä saajia voi olla enintään kaksi ja heidän on oltava eri
-    kauppalohkoissa.
+    Below 12 players only one player may receive the bonus. In a 12+ player
+    combined game there may be at most two recipients, and they must be in
+    different trade blocks.
     """
 
     if not granted:
@@ -211,11 +211,10 @@ def _find_player(game: GameState, civilization: str) -> PlayerState:
 
 
 class LocalGameService(GameService):
-    """Prosessin sisäinen toteutus, joka omistaa tilan ja kirjoittaa levylle.
+    """The in-process implementation that owns the state and writes to disk.
 
-    Työpöytäsovellus käyttää tätä suoraan; palvelimella HTTP-kerros kääriytyy
-    tämän ympärille. Kirjoitukset sarjallistuvat, koska kirjoittavia prosesseja
-    on tasan yksi.
+    The desktop app uses this directly; on the server the HTTP layer wraps it.
+    Writes serialise because there is exactly one writing process.
     """
 
     def __init__(
@@ -233,7 +232,7 @@ class LocalGameService(GameService):
             else (save_path.with_suffix(".jsonl") if save_path else None)
         )
 
-    # -- luku ---------------------------------------------------------------
+    # -- reading ------------------------------------------------------------
 
     def snapshot(self) -> GameState:
         return copy.deepcopy(self._game)
@@ -243,15 +242,15 @@ class LocalGameService(GameService):
         return self._game.state_version
 
     def save(self) -> None:
-        """Kirjoita tilannekuva levylle ilman komentoa.
+        """Write the snapshot to disk without a command.
 
-        Tarvitaan kun peli otetaan käyttöön sellaisenaan (uusi peli), jolloin
-        mitään komentoa ei ole suoritettu mutta tila on silti tallennettava.
+        Needed when a game is installed as-is (a new game), where no command
+        has run but the state still has to be persisted.
         """
 
         self._save()
 
-    # -- komennot -----------------------------------------------------------
+    # -- commands -----------------------------------------------------------
 
     def set_cities(
         self,
@@ -327,8 +326,8 @@ class LocalGameService(GameService):
         actor: str = "",
     ) -> CommandResult:
         player = self._checked_player(civilization, expected_version)
-        # Uudet kortit leimataan kuluvalle kierrokselle. Vanhojen leima säilyy,
-        # jotta useassa erässä kirjattu osto ei siirrä niitä eteenpäin.
+        # New cards are stamped with the current turn. Existing stamps are kept, so
+        # a purchase recorded in several batches does not move them forward.
         previous = set(player.advances)
         turn = self._game.round_number
         player.advances = list(advances)
@@ -360,10 +359,10 @@ class LocalGameService(GameService):
         expected_version: int | None = None,
         actor: str = "",
     ) -> CommandResult:
-        """Details-dialogi tallentaa kaikki kenttänsä kerralla.
+        """The Details dialog saves all of its fields at once.
 
-        Yksi komento eikä kuutta: käyttäjän teko on yksi, joten myös
-        versionnosto, lokirivi ja mahdollinen peruutus ovat yksi.
+        One command rather than six: the user's action is one, so the version
+        bump, the log line and any future undo are one as well.
         """
 
         player = self._checked_player(civilization, expected_version)
@@ -419,7 +418,7 @@ class LocalGameService(GameService):
         self._save()
         return CommandResult(state_version=self._game.state_version)
 
-    # -- sisäiset ------------------------------------------------------------
+    # -- internals -----------------------------------------------------------
 
     def _checked_player(
         self,
@@ -438,10 +437,10 @@ class LocalGameService(GameService):
         arguments: dict,
         actor: str,
     ) -> CommandResult:
-        """Normalisoi, kasvata versiot, kirjaa loki ja tallenna tilannekuva.
+        """Normalize, bump the versions, append the log and save the snapshot.
 
-        `normalize()` ajetaan vasta tässä, jotta rajojen ulkopuolinen arvo
-        leikkautuu samalla tavalla riippumatta siitä mikä asiakas sen lähetti.
+        `normalize()` runs only here, so that an out-of-range value is clamped
+        the same way no matter which client sent it.
         """
 
         player.normalize()
@@ -461,11 +460,11 @@ class LocalGameService(GameService):
         actor: str,
         player: PlayerState | None,
     ) -> None:
-        """Lisää rivi komentolokiin.
+        """Append a line to the command log.
 
-        Loki on lisäyksellinen: se antaa tarkastusjäljen ("kuka muutti mitä ja
-        milloin"), joka on 16 kirjoittajan pelissä olennaisesti hyödyllisempi
-        kuin yhden, ja pohjan yhden askeleen peruutukselle.
+        The log is append-only: it gives an audit trail ("who changed what and
+        when") that is far more useful with sixteen writers than with one, and
+        it is the substrate for a one-step undo.
         """
 
         if self._log_path is None:

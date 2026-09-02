@@ -1,5 +1,4 @@
-"""Asiakaspuoli: työpöytäsovellus ja sen yhteys palvelimeen.
+"""The client side: the desktop app and its connection to the server.
 
-Vain vakiokirjastoa — työpöytäsovelluksen on käynnistyttävä paljaalla
-`python3`:lla, ilman venviä. Se on se mikä tekee paikallisesta
-varasuunnitelmasta todellisen."""
+Standard library only — the desktop app must start under bare `python3`,
+without the venv. That is what makes the local fallback real."""

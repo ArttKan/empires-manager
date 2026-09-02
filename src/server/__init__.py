@@ -1,2 +1,2 @@
-"""Palvelinpuoli. HTTP-kerros itse on juuren `main.py`;
-täällä on se mitä se tarvitsee eikä kukaan muu."""
+"""The server side. The HTTP layer itself is `main.py` at the root;
+what lives here is what only it needs."""

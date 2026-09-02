@@ -1,14 +1,14 @@
-"""Mega Empires backend — HTTP-kerros.
+"""Mega Empires backend — the HTTP layer.
 
-Ohut kerros `GameService`-komentojen päälle. Täällä ei ole pelilogiikkaa: reitit
-kääntävät HTTP:n komennoiksi, tarkistavat tokenin ja lähettävät muutosilmoituksen
-kuunteleville asiakkaille. Säännöt ovat `src/service.py`:ssä, jotta ne
-pätevät myös työpöytäsovellukselle.
+A thin layer over the `GameService` commands. There is no game logic here: the
+routes translate HTTP into commands, check the token and notify listening
+clients of changes. The rules live in `src/service.py`, so that they hold for
+the desktop app as well.
 
-Reitit:
-  GET  /health                      elossaolo, ei tokenia
-  GET  /events                      SSE-muutosilmoitukset, ei tokenia (ks. alla)
-  GET  /state                       koko pelitila, token
+Routes:
+  GET  /health                      liveness, no token
+  GET  /events                      SSE change notifications, no token (below)
+  GET  /state                       the whole game state, token
   POST /players/{civ}/cities        token
   POST /players/{civ}/census        token
   POST /players/{civ}/ast-step      token
@@ -17,11 +17,12 @@ Reitit:
   POST /players/{civ}/details       token
   POST /turn                        token
 
-**Miksi /events on ilman tokenia:** selaimen `EventSource` ei osaa lähettää
-Authorization-otsaketta. Sen sijaan että token ujutettaisiin kyselyparametriin,
-virta ei kuljeta pelidataa lainkaan — vain uuden `state_version`-numeron. Asiakas
-hakee varsinaisen tilan `/state`-reitiltä tokenilla. Sivutuotteena tämä toteuttaa
-myös säännön "jokainen uudelleenyhteys hakee tuoreen tilannekuvan".
+**Why /events takes no token:** a browser's `EventSource` cannot send an
+Authorization header. Rather than smuggling the token into a query parameter,
+the stream carries no game data at all — only the new `state_version` number.
+The client then fetches the actual state from `/state` with its token. As a
+side effect this also implements the rule "every reconnect pulls a fresh
+snapshot".
 """
 
 import asyncio
@@ -65,8 +66,8 @@ from src.storage import (
 )
 from src.server.tokens import ADMIN, Principal, TokenStore, tokens_path
 
-# ECHO_TOKEN on Phase A:n nimi. Uusi nimi on kuvaavampi, mutta vanha kelpaa yhä,
-# jottei palvelimen /etc/mega-empires-backend.env vaadi samanaikaista muutosta.
+# ECHO_TOKEN is the Phase A name. The new name is more descriptive, but the old
+# one still works, so /etc/mega-empires-backend.env need not change in step.
 TOKEN = os.environ.get("MEGA_EMPIRES_TOKEN") or os.environ.get("ECHO_TOKEN")
 
 HEARTBEAT_SECONDS = 15
@@ -79,26 +80,26 @@ _tokens: Optional[TokenStore] = None
 _lock = asyncio.Lock()
 _subscribers: "set[asyncio.Queue]" = set()
 
-# HUOM sammutuksesta: `/events` on ääretön vastaus, ja uvicorn odottaa kesken
-# olevien vastausten valmistumista ennen poistumista. Yksikin auki oleva puhelin
-# jumittaa siis `systemctl restart`in. Tätä **ei voi korjata sovelluksesta**:
-# uvicorn ajaa lifespan-sammutuksen vasta pyyntöjen valuttamisen jälkeen, joten
-# käsittelijä joka sulkisi virrat odottaa itse niiden sulkeutumista.
-# Ratkaisu on ExecStartin --timeout-graceful-shutdown; ks. deploy/README.md.
+# NOTE on shutdown: `/events` is an infinite response, and uvicorn waits for
+# in-flight responses to finish before exiting. A single open phone therefore
+# hangs `systemctl restart`. This **cannot be fixed in the application**:
+# uvicorn runs lifespan shutdown only after draining requests, so a handler
+# that would close the streams is itself waiting on them.
+# The fix is ExecStart's --timeout-graceful-shutdown; see deploy/README.md.
 app = FastAPI(title="Mega Empires backend")
 
 
 # --------------------------------------------------------------------------
-# Palvelu ja tunnistautuminen
+# The service and authentication
 # --------------------------------------------------------------------------
 
 
 def get_service() -> LocalGameService:
-    """Lataa peli levyltä ensimmäisellä kutsulla.
+    """Load the game from disk on the first call.
 
-    Lataus on laiska eikä käynnistyksessä, jotta palvelu nousee myös silloin kun
-    tallennusta ei vielä ole. Peli luodaan toistaiseksi työpöytäsovelluksella;
-    luonti HTTP:n yli tulee RemoteGameServicen mukana.
+    Loading is lazy rather than at startup, so the service comes up even when
+    there is no save yet. A game is created with the desktop app; creating one
+    over HTTP arrives with RemoteGameService.
     """
 
     global _service
@@ -114,17 +115,17 @@ def get_service() -> LocalGameService:
 
 
 def set_service(service: Optional[LocalGameService]) -> None:
-    """Testien ja uudelleenlatauksen käyttöön."""
+    """For the tests and for reloading."""
 
     global _service
     _service = service
 
 
 def get_token_store() -> TokenStore:
-    """Lataa tai luo pelaajakohtaiset tokenit.
+    """Load or create the per-player tokens.
 
-    Luodaan tarvittaessa nykyisen pelin sivilisaatioista, jotta myös käsin
-    palvelimelle kopioitu peli saa tokenit ilman erillistä askelta.
+    Created if needed from the current game's civilizations, so that a game
+    copied to the server by hand also gets tokens without a separate step.
     """
 
     global _tokens
@@ -146,16 +147,16 @@ def set_token_store(store: "Optional[TokenStore]") -> None:
 
 
 def get_principal(authorization: str = Header(default="")) -> Principal:
-    """Tunnista kutsuja adminiksi tai pelaajaksi.
+    """Identify the caller as an admin or a player.
 
-    401 tarkoittaa "en tiedä kuka olet", 403 "tiedän, mutta et saa". Ne on
-    pidettävä erillään, jotta puhelin osaa erottaa vanhentuneen tokenin
-    väärään riviin koskemisesta.
+    401 means "I do not know who you are", 403 means "I do, but you may not".
+    They must be kept apart so a phone can tell a stale token from touching the
+    wrong row.
     """
 
     if not TOKEN:
-        # Sulkeudu, älä avaudu: konfiguroimaton token ei saa tarkoittaa
-        # tunnistautumatonta pääsyä.
+        # Fail closed, not open: an unconfigured token must never mean
+        # unauthenticated access.
         raise HTTPException(
             status_code=500, detail="Server token is not configured"
         )
@@ -166,7 +167,7 @@ def get_principal(authorization: str = Header(default="")) -> Principal:
     try:
         store = get_token_store()
     except HTTPException:
-        # Peliä ei ole, joten pelaajatokeneita ei voi olla. Admin kelpaa yhä.
+        # There is no game, so there can be no player tokens. Admin still works.
         if token and TOKEN and secrets.compare_digest(token, TOKEN):
             return Principal("admin")
         raise HTTPException(status_code=401, detail="Invalid bearer token")
@@ -195,11 +196,10 @@ PHASE_LABELS = {
 
 
 def check_phase(principal: Principal, command: str) -> None:
-    """Estä puhelimelta komennot väärässä vaiheessa.
+    """Block a phone's commands in the wrong phase.
 
-    Kannettava ja korotettu puhelin ohittavat portin: pelinjohtajan on voitava
-    korjata virhe milloin tahansa ilman että peliä siirretään vaiheissa
-    taaksepäin.
+    The laptop and an elevated phone bypass the gate: the game master must be
+    able to correct a mistake at any time without stepping the game backwards.
     """
 
     allowed = PHASE_GATED_COMMANDS.get(command)
@@ -221,7 +221,7 @@ def require_admin(principal: Principal) -> None:
 
 
 # --------------------------------------------------------------------------
-# Komentojen suoritus ja muutosilmoitukset
+# Running commands and notifying of changes
 # --------------------------------------------------------------------------
 
 
@@ -231,10 +231,10 @@ async def broadcast(state_version: int) -> None:
 
 
 async def execute(command: Callable[[], CommandResult]) -> dict:
-    """Suorita komento, käännä virheet statuskoodeiksi ja ilmoita muutoksesta.
+    """Run a command, map errors to status codes and broadcast the change.
 
-    Lukko sarjallistaa kirjoitukset. Kirjoittavia prosesseja on yksi, joten tämä
-    riittää eikä hajautettua lukitusta tarvita.
+    The lock serialises writes. There is one writing process, so this is enough
+    and no distributed locking is needed.
     """
 
     async with _lock:
@@ -243,8 +243,8 @@ async def execute(command: Callable[[], CommandResult]) -> dict:
         except UnknownPlayer as error:
             raise HTTPException(status_code=404, detail=str(error))
         except VersionConflict as error:
-            # Asiakkaan on haettava tuore tila; automaattinen uudelleenyritys
-            # vanhalla arvolla yliajaisi juuri sen muutoksen josta konflikti tuli.
+            # The client must fetch fresh state; an automatic retry with the old value
+            # would overwrite the very change that caused the conflict.
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -266,7 +266,7 @@ async def execute(command: Callable[[], CommandResult]) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Pyyntörungot
+# Request bodies
 # --------------------------------------------------------------------------
 
 
@@ -308,7 +308,7 @@ class TurnBody(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# Reitit
+# Routes
 # --------------------------------------------------------------------------
 
 
@@ -323,21 +323,21 @@ async def health() -> dict:
 
 @app.get("/state")
 async def state(principal: Principal = Depends(get_principal)) -> dict:
-    """Koko pelitila. Luettavissa myös pelaajatokenilla.
+    """The whole game state. Readable with a player token too.
 
-    Peli on avoimen informaation peli — pistetilanne on TV:llä kaikkien
-    nähtävissä — joten rivien piilottaminen puhelimilta ei suojaisi mitään.
-    Kirjoitusoikeus on eri asia ja rajattu erikseen.
+    This is a game of open information — the score is on the TV for everyone to
+    see — so hiding rows from phones would protect nothing. Write access is a
+    different matter and is restricted separately.
     """
 
     game = get_service().snapshot()
     data = game.to_dict()
-    # Pisteet lasketaan palvelimella eikä asiakkaassa. Muuten VP-säännöt ja
-    # korttien hintaluokat olisivat olemassa sekä Pythonissa että
-    # JavaScriptissä, ja ne ehtisivät erkaantua ennen kuin kukaan huomaa —
-    # riita pistetilanteesta pöydässä on huono paikka löytää se.
+    # Scores are computed on the server, not in the client. Otherwise the VP
+    # rules and the card price bands would exist in both Python and JavaScript,
+    # and would drift apart before anyone noticed — an argument about the score
+    # at the table is a poor place to discover that.
     rankings = visible_rankings(game.players)
-    # Ladataan luomatta: lukupyyntö ei saa luoda tokeneita sivuvaikutuksena.
+    # Load without creating: a read must not mint tokens as a side effect.
     store = TokenStore.load(tokens_path(data_directory()))
     claims = dict(store.status()) if store is not None else {}
     for entry, player in zip(data["players"], game.players):
@@ -350,22 +350,22 @@ async def state(principal: Principal = Depends(get_principal)) -> dict:
             "total": score.total,
         }
         entry["rank"] = rankings[player.civilization]
-        # Värit tulevat pelikomponentista (data.py). Asiakas ei saa arvata
-        # niitä: pöydässä pelaaja tunnistaa itsensä juuri väristä.
+        # The colours come from the game component (data.py). The client must not
+        # guess them: at the table a player recognises themselves by the colour.
         civilization = CIVILIZATION_BY_NAME[player.civilization]
         entry["color"] = civilization.color
         entry["text_color"] = civilization.text_color
-        # Onko paikka varattu puhelimelta. Mukana tässä eikä erillisenä
-        # kutsuna, koska pistetaulu on näkyvissä lähes koko ajan ja toinen
-        # pyyntö joka kyselyllä olisi turhaa liikennettä.
+        # Whether a phone has claimed the seat. Included here rather than as a
+        # separate call, because the scoreboard is on screen nearly all the time and
+        # a second request on every poll would be wasted traffic.
         entry["claimed"] = bool(claims.get(player.civilization))
     data["phase_gates"] = {
         command: sorted(phases)
         for command, phases in PHASE_GATED_COMMANDS.items()
     }
-    # Kuka kysyi. Puhelin ei voi päätellä korotustaan mistään muualta, eikä
-    # sitä saa säilöä pelkkään localStorageen: vapautus ei silloin purkaisi
-    # käyttöliittymää, vaikka palvelin kieltäytyisikin kirjoituksista.
+    # Who asked. A phone cannot work out its elevation from anywhere else, and it
+    # must not be kept in localStorage alone: releasing a seat would then not
+    # undo the UI, even though the server would refuse the writes.
     data["you"] = {
         "civilization": principal.civilization,
         "elevated": principal.elevated,
@@ -379,12 +379,12 @@ async def advance_catalogue(
     civilization: str,
     principal: Principal = Depends(get_principal),
 ) -> dict:
-    """Advance-kortit hintoineen tälle pelaajalle.
+    """The Advances with their prices for this player.
 
-    Hinnat lasketaan palvelimella, koska ne riippuvat värikrediiteistä ja
-    referenssitaulukon rivialennuksista — `credits.py`:n logiikasta, jota ei
-    haluta toistaa JavaScriptissä. Luettavissa millä tahansa kelvollisella
-    tokenilla; hinnat johtuvat tilasta joka on muutenkin näkyvissä.
+    Prices are computed on the server because they depend on colour credits and
+    the reference table's row discounts — the logic in `credits.py`, which we
+    do not want to repeat in JavaScript. Readable with any valid token; the
+    prices follow from state that is visible anyway.
     """
 
     game = get_service().snapshot()
@@ -397,18 +397,18 @@ async def advance_catalogue(
         )
 
     owned = set(player.advances)
-    # Alennukset lasketaan vain aiempien kierrosten korteista: hankintavaihe on
-    # yhtäaikainen, joten saman kierroksen ostot eivät alenna toisiaan silloinkaan
-    # kun pelaaja kirjaa ne useassa erässä.
+    # Discounts come only from earlier turns' cards: the acquisition phase is
+    # simultaneous, so same-turn purchases do not discount each other even when
+    # the player records them in several batches.
     discounting = discount_advances(player, game.round_number)
-    # Lukitus on käyttöliittymän vihje POSTin säännöstä, joten sen on
-    # noudatettava samaa poikkeusta: kannettava ja korotettu puhelin saavat
-    # purkaa aiempienkin kierrosten kortteja. Muuten lista estäisi sen mitä
-    # palvelin ottaisi vastaan.
+    # The lock is the UI's hint about the POST rule, so it has to honour the same
+    # exception: the laptop and an elevated phone may unpick cards from earlier
+    # turns too. Otherwise the list would forbid what the server would accept.
+    #
     locked = set() if principal.bypasses_gates else set(discounting)
-    # Milloin kortti ostettiin. Eri asia kuin `locked`, joka kertoo vain saako
-    # sen perua: korotetulla puhelimella mikään ei ole lukittu, mutta listan
-    # ryhmittely tarvitsee silti tiedon ostohetkestä.
+    # When the card was bought. A different thing from `locked`, which says only
+    # whether it may be undone: on an elevated phone nothing is locked, but the
+    # list's grouping still needs to know when it was bought.
     bought_now = set(player.advances) - set(discounting)
     totals = color_credits(player, game.player_count, owned=discounting)
     entries = []
@@ -424,7 +424,7 @@ async def advance_catalogue(
                 "vp": advance.victory_points,
                 "groups": list(advance.groups),
                 "owned": advance.id in owned,
-                # Aiempien kierrosten kortit ovat pysyviä: niitä ei voi purkaa.
+                # Cards from earlier turns are permanent: they cannot be unpicked.
                 "locked": advance.id in locked,
                 "this_turn": advance.id in bought_now,
                 "effective_cost": price.effective_cost,
@@ -518,8 +518,8 @@ async def set_advances(
             (p for p in game.players if p.civilization == civilization), None
         )
         if player is not None:
-            # Aiempien kierrosten kortit ovat pysyviä. Vain kuluvan kierroksen
-            # ostoja saa perua, jotta näppäilyvirheen voi korjata heti.
+            # Cards from earlier turns are permanent. Only this turn's purchases may be
+            # undone, so a mistyped entry can be fixed straight away.
             permanent = set(discount_advances(player, game.round_number))
             removed = permanent - set(body.advances)
             if removed:
@@ -586,17 +586,17 @@ async def create_game(
     payload: dict,
     principal: Principal = Depends(get_principal),
 ) -> dict:
-    require_admin(principal)
-    """Asenna uusi peli ja korvaa nykyinen.
+    """Install a new game, replacing the current one.
 
-    Työpöytäsovelluksen uuden pelin velho tuottaa valmiin `GameState`-rakenteen,
-    joten palvelimen ei tarvitse toistaa skenaariologiikkaa: se ottaa vastaan
-    serialisoidun tilan ja ottaa sen käyttöön.
+    The desktop app's new-game wizard produces a complete `GameState`, so the
+    server need not repeat the scenario logic: it accepts a serialised state
+    and installs it.
 
-    Korvaa myös välimuistissa olevan palvelun, joten palvelua ei tarvitse
-    käynnistää uudelleen — se oli aiemmin ainoa tapa vaihtaa peliä.
+    This also swaps the cached service, so the service does not need
+    restarting — which used to be the only way to change games.
     """
 
+    require_admin(principal)
     try:
         game = GameState.from_dict(payload)
     except (KeyError, TypeError, ValueError) as error:
@@ -606,23 +606,23 @@ async def create_game(
     if not game.players:
         raise HTTPException(status_code=422, detail="A game needs players.")
 
-    # Uusi peli alkaa versiosta 0, jottei vanhan pelin laskuri jää voimaan.
+    # A new game starts from version 0, so the old game's counter cannot carry over.
     game.state_version = 0
     for player in game.players:
         player.version = 0
 
     path = default_save_path()
     async with _lock:
-        # Edellinen peli siirretään syrjään ennen korvaamista: palvelin lukee
-        # vain yhtä tiedostoa, joten ilman tätä vahinkopainallus tuhoaisi
-        # käynnissä olevan pelin pysyvästi.
+        # The previous game is archived before it is replaced: the server reads one
+        # file only, so without this a mistaken click would destroy a game in
+        # progress for good.
         archived = archive_existing(path)
         service = LocalGameService(game, save_path=path)
         service.save()
         set_service(service)
-        # Uusi peli, uudet tokenit ja uusi liittymiskoodi: pelaajat vaihtavat
-        # sivilisaatiota pelien välillä, joten vanhojen kantaminen mukana
-        # osuisi useammin väärin kuin oikein.
+        # A new game means new tokens and a new join code: players change
+        # civilization between games, so carrying the old ones over would be wrong
+        # more often than right.
         set_token_store(
             TokenStore.create(
                 [player.civilization for player in game.players],
@@ -640,8 +640,8 @@ async def create_game(
 
 
 class JoinBody(BaseModel):
-    # Yksi kenttä, kaksi kelpaavaa koodia: peli- tai admin-koodi. Jälkimmäinen
-    # varaa paikan samalla tavalla ja merkitsee sen lisäksi korotetuksi.
+    # One field, two acceptable codes: the game code or the admin code. The
+    # latter claims a seat the same way and marks it elevated as well.
     code: str
     civilization: str = ""
 
@@ -651,8 +651,8 @@ class ReleaseBody(BaseModel):
 
 
 def _client_key(request: Request) -> str:
-    # Cloudflare-tunnelin takana request.client on aina 127.0.0.1, joten
-    # oikea osoite luetaan edgen otsakkeesta kun se on saatavilla.
+    # Behind the Cloudflare tunnel request.client is always 127.0.0.1, so the
+    # real address is read from the edge's header when it is available.
     return (
         request.headers.get("cf-connecting-ip")
         or (request.client.host if request.client else "unknown")
@@ -660,10 +660,10 @@ def _client_key(request: Request) -> str:
 
 
 def _check_join_rate(request: Request) -> None:
-    """Rajoita väärien koodien arvailua.
+    """Rate-limit guessing at the codes.
 
-    Liittymiskoodi on lyhyt, koska se luetaan ääneen. Se kestää arvailua vain
-    jos yrityksiä rajoitetaan.
+    The join code is short because it is read aloud. It only withstands
+    guessing if the attempts are limited.
     """
 
     key = _client_key(request)
@@ -688,10 +688,10 @@ def _record_join_failure(request: Request) -> None:
 
 
 def _nicknames() -> dict:
-    """Sivilisaatio -> pelin perustuksessa annettu nimi.
+    """Civilization -> the nickname given when the game was set up.
 
-    Paikan valinta on juuri se hetki jolloin väärä rivi valitaan, joten
-    nimi näytetään värin rinnalla: se on vahvin tunniste pöydässä.
+    Picking a seat is the exact moment the wrong row gets chosen, so the name
+    is shown alongside the colour: it is the strongest identifier at the table.
     """
 
     try:
@@ -703,10 +703,10 @@ def _nicknames() -> dict:
 
 @app.post("/join/roster")
 async def join_roster(body: JoinBody, request: Request) -> dict:
-    """Kerro mitkä paikat ovat vapaana. Koodi vaaditaan jo tähän.
+    """Report which seats are free. A code is required even for this.
 
-    Ilman koodia kuka tahansa domainin löytänyt näkisi pelin kokoonpanon ja
-    voisi seurata milloin paikkoja vapautuu.
+    Without one, anyone who found the domain could see the game's line-up and
+    watch for seats becoming free.
     """
 
     _check_join_rate(request)
@@ -717,8 +717,8 @@ async def join_roster(body: JoinBody, request: Request) -> dict:
         raise HTTPException(status_code=403, detail="Wrong join code.")
     nicknames = _nicknames()
     return {
-        # Kerrotaan jo tässä kumman koodin liittyjä antoi, jotta hän näkee sen
-        # ennen paikan varaamista eikä vasta jälkeenpäin.
+        # Report here which code was given, so the joiner sees it before claiming a
+        # seat rather than after.
         "elevated": kind == ADMIN,
         "players": [
             {
@@ -734,7 +734,7 @@ async def join_roster(body: JoinBody, request: Request) -> dict:
 
 @app.post("/join")
 async def join(body: JoinBody, request: Request) -> dict:
-    """Varaa sivilisaatio ja palauta sen token."""
+    """Claim a civilization and return its token."""
 
     _check_join_rate(request)
     store = get_token_store()
@@ -749,8 +749,8 @@ async def join(body: JoinBody, request: Request) -> dict:
         if "join code" in message:
             _record_join_failure(request)
             raise HTTPException(status_code=403, detail=message)
-        # Väärä koodi ja varattu paikka on erotettava toisistaan: jälkimmäinen
-        # on tavallinen tilanne pöydässä, ei tunkeutumisyritys.
+        # A wrong code and a taken seat must be told apart: the latter is an ordinary
+        # situation at the table, not an intrusion attempt.
         raise HTTPException(status_code=409, detail=message)
     return {
         "token": token,
@@ -761,7 +761,7 @@ async def join(body: JoinBody, request: Request) -> dict:
 
 @app.get("/admin/join")
 async def admin_join(principal: Principal = Depends(get_principal)) -> dict:
-    """Liittymiskoodi ja kuka on jo mukana. Kannettavan aulanäkymää varten."""
+    """The join code and who has joined. For the laptop's lobby view."""
 
     require_admin(principal)
     store = get_token_store()
@@ -786,10 +786,10 @@ async def admin_release(
     body: ReleaseBody,
     principal: Principal = Depends(get_principal),
 ) -> dict:
-    """Vapauta paikka uudelleen varattavaksi.
+    """Free a seat to be claimed again.
 
-    Tarvitaan kun puhelin vaihtuu tai selaimen tiedot tyhjenevät: muuten
-    pelaaja lukittuisi ulos omasta rivistään kesken pelin.
+    Needed when a phone is swapped or a browser's data is cleared: otherwise a
+    player would be locked out of their own row mid-game.
     """
 
     require_admin(principal)
@@ -802,12 +802,12 @@ async def admin_release(
 
 
 async def event_stream(request: Request):
-    """SSE-virta, joka kertoo vain uuden version numeron.
+    """The SSE stream, which carries only the new version number.
 
-    Odottaa jonossa eikä pyöri sekunnin silmukassa kuten Phase A:n versio. Näin
-    heartbeat lähtee vasta kun virta on oikeasti hiljainen, mikä on juuri se
-    tilanne jossa se on tarpeen: pelin aikana muutoksia tulee purskeina ja
-    väleissä voi olla minuutteja.
+    It waits on a queue rather than spinning in a one-second loop as the Phase A
+    version did. The heartbeat therefore goes out only when the stream is
+    genuinely quiet, which is exactly when it is needed: during a game changes
+    arrive in bursts with minutes between them.
     """
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -855,21 +855,21 @@ WEB_DIRECTORY = Path(__file__).resolve().parent / "web"
 
 @app.get("/", response_class=HTMLResponse)
 async def player_app() -> HTMLResponse:
-    """Pelaajien sivu.
+    """The players' page.
 
-    Yksi sivu, joka näyttää liittymislomakkeen tai oman rivin sen mukaan onko
-    selaimessa tallennettu token. Näin pöydässä luetaan ääneen vain domain,
-    ei polkua sen perässä.
+    One page, showing either the join form or the player's own row depending on
+    whether the browser holds a token. That way only the bare domain is read
+    aloud at the table, with no path after it.
 
-    `no-store`, koska sivu päivittyy tiheästi eikä siinä ole versioituja
-    tiedostonimiä. Ilman sitä selain käyttää heuristista välimuistia ja puhelin
-    voi jäädä pyörittämään vanhaa versiota pitkäksi aikaa — ja koska koko
-    sovellus on yksi tiedosto, se tarkoittaa koko sovellusta.
+    `no-store`, because the page changes often and has no versioned filenames.
+    Without it the browser applies heuristic caching and a phone can keep
+    running an old version for a long time — and since the whole app is one
+    file, that means the whole app.
     """
 
     html = (WEB_DIRECTORY / "index.html").read_text(encoding="utf-8")
-    # X-Build kertoo mikä versio asiakkaalle meni. Sivu on yksi versioimaton
-    # tiedosto, joten ilman tätä ei voi todeta ajaako puhelin nykyistä koodia.
+    # X-Build says which version reached the client. The page is one unversioned
+    # file, so without it there is no way to tell whether a phone runs current code.
     build = hashlib.sha256(html.encode("utf-8")).hexdigest()[:8]
     return HTMLResponse(
         html,

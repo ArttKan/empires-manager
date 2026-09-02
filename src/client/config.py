@@ -1,14 +1,14 @@
-"""Palvelinasetusten lukeminen.
+"""Reading the server settings.
 
-Työpöytäsovellus ajetaan normaalisti palvelinta vasten, joten osoitetta ja
-tokenia ei haluta kirjoittaa käynnistysriville joka kerta. Asetukset luetaan
-tiedostosta, jonka ympäristömuuttujat voivat ohittaa.
+The desktop app normally runs against a server, so nobody wants to type the
+address and token on the command line every time. The settings are read from a
+file, which environment variables may override.
 
-Ratkaisu tehdään kutsuhetkellä eikä tuontihetkellä, samasta syystä kuin
-`storage.data_directory()`: testit ja käynnistysympäristö voivat asettaa
-muuttujat prosessin käynnistyksen jälkeen.
+Resolution happens at call time rather than import time, for the same reason as
+`storage.data_directory()`: tests and the launch environment may set the
+variables after the process has started.
 
-Vain vakiokirjastoa — tämä on työpöytäsovelluksen polulla.
+Standard library only — this is on the desktop app's path.
 """
 
 from __future__ import annotations
@@ -41,17 +41,17 @@ def _file_values() -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        # Puuttuva tai rikkinäinen asetustiedosto ei saa estää käynnistystä:
-        # sovellus putoaa silloin paikalliseen tilaan.
+        # A missing or broken config file must not block startup: the app falls back
+        # to local mode instead.
         return {}
     return data if isinstance(data, dict) else {}
 
 
 def load_server_config() -> ServerConfig | None:
-    """Palauta palvelinasetukset tai None, jos peli ajetaan paikallisesti.
+    """Return the server settings, or None if the game runs locally.
 
-    Ympäristömuuttuja voittaa tiedoston kenttäkohtaisesti, jotta esimerkiksi
-    pelkän osoitteen voi vaihtaa hetkeksi ilman että token pitää toistaa.
+    An environment variable beats the file per field, so that for instance the
+    address alone can be changed for a moment without repeating the token.
     """
 
     values = _file_values()

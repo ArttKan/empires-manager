@@ -1,17 +1,17 @@
-"""`GameService`-toteutus HTTP:n yli.
+"""A `GameService` implementation over HTTP.
 
-Työpöytäsovellus käyttää tätä silloin kun peli on palvelimella. Rajapinta on
-sama kuin `LocalGameService`:llä, joten `ui.py` ei tiedä kumpaa se pitelee.
+The desktop app uses this when the game lives on the server. The interface is
+the same as `LocalGameService`'s, so `ui.py` does not know which one it holds.
 
-**Vain vakiokirjastoa.** Palvelimella on venv jossa on httpx, mutta
-työpöytäsovelluksen on käynnistyttävä pelkällä `python3`:lla ilman venviä —
-se on koko paikallisen varajärjestelmän edellytys. Siksi täällä käytetään
-`urllib.request`ia eikä httpx:ää.
+**Standard library only.** The server has a venv with httpx in it, but the
+desktop app must start under bare `python3` without the venv — that is the
+whole precondition for the local fallback. Hence `urllib.request` here rather
+than httpx.
 
-Kutsut ovat synkronisia ja siis estäviä. Aikakatkaisu on tarkoituksella lyhyt:
-verkon katketessa napin painallus saa jumittaa käyttöliittymän korkeintaan sen
-verran. Vaihtoehto olisi taustasäie, mikä toisi säikeistyksen työpöytäsovellukseen
-pelkän harvinaisen virhetilanteen vuoksi.
+The calls are synchronous and therefore blocking. The timeout is deliberately
+short: when the network drops, a button press may freeze the UI for at most
+that long. The alternative would be a background thread, which would bring
+threading into the desktop app for the sake of one rare failure case.
 """
 
 from __future__ import annotations
@@ -35,11 +35,11 @@ from ..service import (
 
 DEFAULT_TIMEOUT = 3.0
 
-# Cloudflare torjuu urllibin oletusotsakkeen "Python-urllib/3.x" virhekoodilla
-# 1010 ("browser signature banned"), joten jokainen pyyntö palautuisi 403:na.
-# Riittää, että sovellus kertoo rehellisesti kuka on — selaimeksi ei tarvitse
-# tekeytyä. Tämä ei paljastu testeissä, koska ne puhuvat suoraan 127.0.0.1:lle
-# eivätkä kulje Cloudflaren läpi.
+# Cloudflare rejects urllib's default "Python-urllib/3.x" header with error
+# 1010 ("browser signature banned"), so every request would come back 403.
+# It is enough for the app to say honestly who it is — no need to pose as a
+# browser. This never shows up in the tests, because they talk straight to
+# 127.0.0.1 and never traverse Cloudflare.
 USER_AGENT = "MegaEmpires-Desktop/1.0 (+https://empiresmanager.com)"
 
 
@@ -54,13 +54,13 @@ class RemoteGameService(GameService):
         self.token = token
         self.timeout = timeout
 
-    # -- luku ---------------------------------------------------------------
+    # -- reading ------------------------------------------------------------
 
     def snapshot(self) -> GameState:
         data = self._request("GET", "/state")
-        # `claimed` ei kuulu pelitilaan eikä säily GameStatessa, joten se
-        # otetaan talteen tässä. Näin pistetaulu voi näyttää kenellä on puhelin
-        # ilman erillistä kutsua.
+        # `claimed` is not game state and does not survive in GameState, so it is
+        # cached here. That way the scoreboard can show who has a phone without a
+        # second request.
         self._claims = {
             str(entry["civilization"]): bool(entry.get("claimed"))
             for entry in data.get("players", [])
@@ -68,11 +68,11 @@ class RemoteGameService(GameService):
         return GameState.from_dict(data)
 
     def claims(self) -> dict:
-        """Sivilisaatio -> onko paikka varattu, viimeisimmästä tilannekuvasta."""
+        """Civilization -> whether the seat is claimed, from the latest snapshot."""
 
         return dict(getattr(self, "_claims", {}))
 
-    # -- komennot -----------------------------------------------------------
+    # -- commands -----------------------------------------------------------
 
     def set_cities(
         self,
@@ -196,38 +196,38 @@ class RemoteGameService(GameService):
         return self._result(self._request("POST", "/turn", payload))
 
     def create_game(self, game: GameState) -> int:
-        """Asenna peli palvelimelle ja palauta uusi state_version.
+        """Install a game on the server and return the new state_version.
 
-        Ei ole osa `GameService`-rajapintaa: paikallisessa tilassa uusi peli
-        syntyy tiedostoon, ei komennolla.
+        Not part of the `GameService` interface: in local mode a new game is
+        created as a file, not by a command.
         """
 
         data = self._request("POST", "/game", game.to_dict())
         return int(data["state_version"])
 
-    # -- ylläpito ------------------------------------------------------------
+    # -- administration ------------------------------------------------------
     #
-    # Nämä eivät kuulu `GameService`-rajapintaan: paikallisessa tilassa ei ole
-    # liittymistä eikä tokeneita, joten niillä ei olisi vastinetta.
+    # These are not part of the `GameService` interface: in local mode there is
+    # no joining and there are no tokens, so they would have no counterpart.
 
     def join_status(self) -> dict:
-        """Liittymiskoodi ja paikkojen tila aulanäkymää varten."""
+        """The join code and the state of the seats, for the lobby view."""
 
         return self._request("GET", "/admin/join")
 
     def release_seat(self, civilization: str) -> dict:
-        """Vapauta paikka uudelleen varattavaksi.
+        """Free a seat to be claimed again.
 
-        Tarvitaan kun puhelin vaihtuu tai selaimen tiedot tyhjenevät. Pelaajalla
-        itsellään ei ole tätä: vahingossa painettuna se lukitsisi hänet ulos
-        kesken pelin.
+        Needed when a phone is swapped or a browser's data is cleared. The
+        player has no such button themselves: pressed by accident it would lock
+        them out mid-game.
         """
 
         return self._request(
             "POST", "/admin/release", {"civilization": civilization}
         )
 
-    # -- sisäiset ------------------------------------------------------------
+    # -- internals -----------------------------------------------------------
 
     def _command(
         self,
@@ -274,24 +274,24 @@ class RemoteGameService(GameService):
         except urllib.error.HTTPError as error:
             raise self._translate(error) from error
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
-            # Verkkovirhe, DNS, aikakatkaisu tai roskaa vastauksessa.
+            # Network error, DNS, timeout, or garbage in the response.
             raise ServiceUnavailable(
                 f"Could not reach the game server at {self.base_url}: {error}"
             ) from error
 
     @staticmethod
     def _translate(error: urllib.error.HTTPError) -> CommandError:
-        """Käännä palvelimen statuskoodi takaisin samaksi poikkeukseksi.
+        """Map a server status code back to the same exception type.
 
-        Näin `ui.py` käsittelee etäpalvelun 422:n täsmälleen samoin kuin
-        paikallisen `RuleViolation`in eikä sen tarvitse tuntea HTTP:tä.
+        That way `ui.py` handles a remote 422 exactly as it handles a local
+        `RuleViolation`, and never needs to know about HTTP.
         """
 
-        # HTTPError on tiedostomainen olio: se on suljettava, tai kahvat
-        # kertyvät pitkään ajossa olevassa työpöytäsovelluksessa.
+        # HTTPError is a file-like object: it has to be closed, or handles pile up
+        # in a long-running desktop app.
         try:
             detail = json.loads(error.read().decode("utf-8")).get("detail")
-        except Exception:  # pragma: no cover - vastaus ei ollut JSONia
+        except Exception:  # pragma: no cover - the response was not JSON
             detail = None
         finally:
             error.close()

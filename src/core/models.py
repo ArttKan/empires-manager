@@ -1,4 +1,4 @@
-"""Tallennettavan pelitilan tietomallit."""
+"""Data models for the persisted game state."""
 
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ class PlayerState:
     ast_bonus: bool = False
     census: int = 0
     flexible_credits: dict[str, int] = field(default_factory=dict)
-    # Kortti-id -> kierros jolla se hankittiin. Tarvitaan koska saman kierroksen
-    # ostot eivät anna alennusta toisilleen: hankintavaihe on yhtäaikainen.
+    # Advance id -> the turn it was acquired on. Needed because purchases made on
+    # the same turn do not discount each other: acquisition is simultaneous.
     advance_turns: dict[str, int] = field(default_factory=dict)
-    # Kasvaa jokaisella hyväksytyllä komennolla. Asiakas lähettää tuntemansa
-    # arvon mukana, jotta vanhentunut kirjoitus voidaan hylätä sen sijaan että
-    # se yliajaisi toisen pelaajan juuri tekemän muutoksen.
+    # Incremented on every accepted command. A client sends the value it knows
+    # along with the write, so a stale write can be rejected instead of
+    # overwriting the change another player just made.
     version: int = 0
 
     @property
@@ -44,7 +44,7 @@ class PlayerState:
         self.ast_step = max(0, min(AST_MAX_STEP, int(self.ast_step)))
         self.census = max(0, min(55, int(self.census)))
         self.advances = list(dict.fromkeys(self.advances))
-        # Leimat vain omistetuille korteille; myydyn kortin leima on roskaa.
+        # Stamps for owned cards only; the stamp of a discarded card is garbage.
         self.advance_turns = {
             advance_id: max(0, int(turn))
             for advance_id, turn in self.advance_turns.items()
@@ -90,9 +90,9 @@ class GameState:
     ast_variant: str = "BASIC"
     round_number: int = 1
     current_phase: int = 1
-    # HUOM: `version` on tallennusmuodon versio, ei pelitilan versio.
-    # `state_version` on maailmanlaajuinen laskuri, jolla asiakas tunnistaa
-    # onko sen tuntema tilannekuva vanhentunut.
+    # NOTE: `version` is the save format version, not the game state version.
+    # `state_version` is the global counter a client uses to tell whether the
+    # snapshot it holds has gone stale.
     version: int = 6
     state_version: int = 0
     saved_at: str = ""

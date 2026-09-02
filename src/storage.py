@@ -1,4 +1,4 @@
-"""Pelitilan paikallinen JSON-tallennus."""
+"""Local JSON persistence for the game state."""
 
 from __future__ import annotations
 
@@ -12,24 +12,24 @@ from pathlib import Path
 from .core.models import GameState
 
 
-# Palvelinasennuksessa tallennukset eivät saa olla lähdekoodihakemistossa, koska
-# git-pohjainen päivitys korvaa sen sisällön. Ympäristömuuttuja ohittaa siksi
-# repon oletushakemiston. Hakemisto ratkaistaan vasta kutsuhetkellä, jotta
-# systemd voi asettaa muuttujan ennen prosessin käynnistystä.
+# On a server install the saves must not live in the source directory, because
+# a git-based update replaces its contents. An environment variable therefore
+# overrides the repo's default directory. It is resolved at call time so that
+# systemd can set the variable before the process starts.
 DATA_DIRECTORY_VARIABLE = "MEGA_EMPIRES_DATA_DIR"
 REPO_SAVE_DIRECTORY = Path(__file__).resolve().parent.parent / "tallennukset"
 DEFAULT_SAVE_NAME = "nykyinen_peli.json"
 
 
 def data_directory() -> Path:
-    """Palauta tallennushakemisto ympäristömuuttujasta tai repon oletuksesta."""
+    """Return the save directory from the environment, or the repo default."""
 
     configured = os.environ.get(DATA_DIRECTORY_VARIABLE, "").strip()
     return Path(configured).expanduser() if configured else REPO_SAVE_DIRECTORY
 
 
 def default_save_path() -> Path:
-    """Palauta oletustallennuksen polku nykyisestä tallennushakemistosta."""
+    """Return the default save path inside the current save directory."""
 
     return data_directory() / DEFAULT_SAVE_NAME
 
@@ -44,7 +44,7 @@ class SavedGame:
 
 
 def save_path_for_name(name: str, directory: Path | None = None) -> Path:
-    """Muodosta käyttäjän antamasta pelinimestä turvallinen JSON-polku."""
+    """Turn a user-supplied game name into a safe JSON path."""
 
     directory = data_directory() if directory is None else directory
     clean_name = name.strip()
@@ -59,7 +59,7 @@ def save_path_for_name(name: str, directory: Path | None = None) -> Path:
 
 
 def list_saved_games(directory: Path | None = None) -> tuple[SavedGame, ...]:
-    """Listaa avattavissa olevat tallennukset uusimmasta vanhimpaan."""
+    """List the openable saves, newest first."""
 
     directory = data_directory() if directory is None else directory
     if not directory.is_dir():
@@ -91,13 +91,13 @@ def list_saved_games(directory: Path | None = None) -> tuple[SavedGame, ...]:
 
 
 def archive_existing(path: Path) -> Path | None:
-    """Siirrä olemassa oleva tallennus syrjään aikaleimatulla nimellä.
+    """Move an existing save aside under a timestamped name.
 
-    Palvelin lukee vain yhtä tiedostoa, joten uuden pelin asentaminen korvaisi
-    edellisen lopullisesti eikä palvelimella ole nimettyjä tallennuksia joihin
-    palata. Arkistointi maksaa kilotavuja ja säästää kokonaisen pelin.
+    The server reads one file only, so installing a new game would otherwise
+    overwrite the previous one for good — and the server has no named saves to
+    fall back on. Archiving costs kilobytes and saves a whole game.
 
-    Palauttaa arkistopolun, tai None jos siirrettävää ei ollut.
+    Returns the archive path, or None if there was nothing to move.
     """
 
     if not path.is_file():
@@ -110,9 +110,9 @@ def archive_existing(path: Path) -> Path | None:
         counter += 1
     path.replace(target)
 
-    # Komentoloki on tallennuksen sisarustiedosto ja kuuluu samaan peliin. Jos
-    # se jätettäisiin paikalleen, uusi peli jatkaisi edellisen tarkastusjälkeä
-    # samaan tiedostoon ja molemmat menisivät sekaisin.
+    # The command log is a sibling of the save and belongs to the same game. If
+    # it were left behind, a new game would continue the previous audit trail in
+    # the same file and the two would be spliced together.
     log = path.with_suffix(".jsonl")
     if log.is_file():
         log.replace(target.with_suffix(".jsonl"))

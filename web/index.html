@@ -21,8 +21,8 @@
     flex: 1; min-height: 0; overflow-y: auto; position: relative;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
-  /* Vedä ylhäältä päivittääksesi. Selaimen oma ele ei toimi, koska vierivä
-     elementti ei ole dokumentti vaan tämä säiliö. */
+  /* Pull down from the top to refresh. The browser's own gesture does not
+     work, because the scrolling element is this container, not the document. */
   #pull {
     position: absolute; top: 0; left: 0; right: 0; z-index: 4;
     display: flex; align-items: center; justify-content: center;
@@ -63,17 +63,17 @@
   .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: .95rem; }
   .msg.error { background: #3a1f1f; color: #ffc9c9; }
   .msg.info { background: var(--panel); color: var(--muted); }
-  /* !important, koska tämä on apuluokka jonka koko tehtävä on piilottaa.
-     Ilman sitä mikä tahansa id-sääntö joka asettaa displayn voittaa
-     tarkkuudessa, ja elementti jää pysyvästi näkyviin — juuri niin kävi
-     #otherille, joka on `display: flex`. Vika on ikävä löytää: luokka vaihtuu
-     DOMissa oikein, mutta mitään ei tapahdu. */
+  /* !important, because this is a utility class whose whole job is to hide.
+     Without it any id rule that sets display wins on specificity and the
+     element stays visible forever — which is exactly what happened to #other,
+     which is `display: flex`. An unpleasant fault to find: the class toggles
+     correctly in the DOM and nothing happens. */
   .hidden { display: none !important; }
 
   /* ── oma rivi ─────────────────────────────────────────────── */
-  /* Väri komponentista. Sitä käytetään reunuksena eikä tekstin värinä, koska
-     osa sivilisaatioista on hyvin vaaleita (Iberia, Egypt) ja osa tummia
-     (Kushan, Parthia) — kumpikaan ei erotu luotettavasti tekstinä. */
+  /* The colour from the component. Used as a border rather than a text
+     colour, because some civilizations are very light (Iberia, Egypt) and
+     others dark (Kushan, Parthia) — neither reads reliably as text. */
   .me {
     background: var(--panel); border-radius: 12px; padding: 18px;
     margin-bottom: 16px; border-left: 8px solid transparent;
@@ -118,16 +118,17 @@
     background: var(--panel-alt); color: var(--muted);
   }
   .bar.warn { background: #4a3a1c; color: #ffe0a3; }
-  /* Toisen rivin muokkaus on tämän ohjelman pahin virhelähde, joten se
-     erottuu kaikkein voimakkaimmin: koko rivi vaihtaa väriä eikä vain
-     otsikkoteksti. */
+  /* Editing someone else's row is this program's worst source of error, so it
+     stands out the most strongly: the whole bar changes colour, not just the
+     heading text. */
   #other {
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px; margin-bottom: 12px; padding: 12px 14px; border-radius: 10px;
     background: #5a2d12; color: #ffd8bd; font-size: .95rem; font-weight: 600;
   }
   #other button { width: auto; margin: 0; padding: 8px 14px; font-size: .85rem; }
-  /* Kumpi koodi kelpasi. Ilman tätä sen näkisi vasta paikan varattuaan. */
+  /* Which code was accepted. Without this you would only see it after
+     claiming a seat. */
   #seat-role {
     margin-bottom: 14px; padding: 10px 12px; border-radius: 8px;
     background: #5a2d12; color: #ffd8bd; font-size: .9rem; font-weight: 600;
@@ -148,8 +149,9 @@
     width: 100%; padding: 12px 14px; margin-bottom: 6px; text-align: left;
     background: var(--panel); color: var(--text);
     border: 1px solid #344258; border-radius: 10px;
-    /* Raita on oma elementtinsä eikä reunaviiva, koska kaksivärisen kortin on
-       näytettävä molemmat värinsä — reunan väri voi olla vain yksi. */
+    /* The stripe is an element of its own rather than a border, because a
+       two-colour card has to show both of its colours — a border can carry
+       only one. */
     overflow: hidden;
   }
   .card .band {
@@ -158,15 +160,15 @@
     margin: -12px 4px -12px -14px;
   }
   .card.owned { border-color: var(--accent); background: var(--panel-alt); }
-  .card:disabled { opacity: 1; }   /* katselutila: kortit näkyvät normaalisti */
+  .card:disabled { opacity: 1; }   /* view mode: cards render normally */
   .card.locked .tick { color: var(--muted); }
   .card .tick { width: 22px; font-size: 1.1rem; color: var(--accent); }
   .card .body { flex: 1; min-width: 0; }
   .card .nm { font-size: 1rem; }
-  /* VP on oma sarakkeensa eikä osa alaotsikkoa: se on kortin pysyvä arvo,
-     kun taas hinta muuttuu krediittien mukaan. Kaksi eri lukua ei saa olla
-     samassa paikassa peräkkäin — juuri siitä syntyi aiempi sekaannus, jossa
-     "7 advances" luki pisteitä eikä kortteja. */
+  /* VP is a column of its own rather than part of a subtitle: it is the
+     card's fixed worth, while the price moves with the credits. Two different
+     numbers must not occupy the same slot in turn — that is exactly what
+     produced the earlier confusion where "7 advances" read points, not cards. */
   .card .vp {
     flex: none; width: 42px; text-align: center;
     font-variant-numeric: tabular-nums; line-height: 1.05;
@@ -178,10 +180,11 @@
   }
   .card .price {
     text-align: right; font-variant-numeric: tabular-nums;
-    /* Kiinteä leveys kolmelle numerolle. Ilman sitä sarake kutistuu
-       kaksinumeroisella hinnalla — ja katoaa kokonaan jo ostetulta kortilta,
-       jolla ei ole hintaa — jolloin joustava nimisarake levenee ja VP-sarake
-       siirtyy riviltä toiselle. Kallein kortti on 290, joten kolme riittää. */
+    /* A fixed width for three digits. Without it the column shrinks on a
+       two-digit price — and disappears entirely on an already-bought card,
+       which has no price — so the flexible name column widens and the VP
+       column shifts from row to row. The dearest card is 290, so three is
+       enough. */
     flex: none; min-width: 36px;
   }
   .card .price .now { font-size: 1.05rem; font-weight: 700; }
@@ -191,19 +194,19 @@
     gap: 10px; margin-bottom: 12px;
   }
   .cards-head button { width: auto; margin: 0; padding: 12px 18px; }
-  /* ── välilehdet ───────────────────────────────────────────── */
-  /* Palkki on kuoren jäsen eikä vierivää sisältöä: se ei liiku, joten
-     ylivieritys ei paljasta sen alta mitään eikä sitä tarvitse piirtää
-     uudelleen kesken rullauksen. */
+  /* -- tabs -------------------------------------------------- */
+  /* The bar belongs to the app shell, not to the scrolling content: it does
+     not move, so overscrolling reveals nothing beneath it and it need not be
+     repainted during a scroll. */
   .tabs {
     flex: none; display: flex;
     background: var(--panel); border-top: 1px solid #344258;
   }
   .tabs button {
     flex: 1; margin: 0; border-radius: 0;
-    /* Ei env(safe-area-*) -täytettä: ilman viewport-fit=coveria selain rajaa
-       näkymän jo valmiiksi järjestelmäpalkkien yläpuolelle, joten oma varaus
-       näkyisi tyhjänä kaistana painikkeiden alla. */
+    /* No env(safe-area-*) padding: without viewport-fit=cover the browser
+       already crops the viewport above the system bars, so reserving space
+       ourselves would show as an empty band below the buttons. */
     padding: 14px 8px;
     background: transparent; color: var(--muted);
     font-size: .95rem; font-weight: 600;
@@ -263,7 +266,7 @@
     <div id="seat-msg" class="msg hidden"></div>
   </section>
 
-  <!-- ── pelinäkymä (tulossa) ─────────────────────────────────── -->
+  <!-- -- the game view ---------------------------------------- -->
   <section id="play" class="hidden">
     <div class="bar" id="bar">Connecting…</div>
 
@@ -342,18 +345,19 @@
 
 <script>
 const STORE_KEY = "megaempires.session";
-// Yksi teksti kaikille kirjausvirheille: pelaajan kannalta syy on sama —
-// arvo ei mennyt perille, katso näytöllä olevat luvut ja yritä tarvittaessa
-// uudelleen. Konfliktin mekaniikka ei auta häntä pöydässä.
+// One message for every entry failure: from the player's point of view the
+// cause is the same — the value did not get through, look at the numbers on
+// screen and try again if needed. The mechanics of a conflict do not help
+// them at the table.
 const ENTRY_FAILED =
   "Entering the information failed. Check the shown values and try again " +
   "if necessary.";
 
 const el = (id) => document.getElementById(id);
-const TABBED = ["play", "board"];   // näkymät joissa välilehtipalkki näkyy
+const TABBED = ["play", "board"];   // views that show the tab bar
 
-// Mikä osio on näkyvissä. Paluunapin käsittelijän on tiedettävä se: se saa
-// sulkea vain Advances-arkin, ei viedä pelaajaa pois sivulta muualta.
+// Which section is visible. The back handler has to know: it may close only
+// the Advances sheet, never take the player off the page from anywhere else.
 let view = "join-code";
 
 const show = (id) => {
@@ -361,8 +365,8 @@ const show = (id) => {
   for (const s of ["join-code", "join-seat", "play", "board", "cards"]) {
     el(s).classList.toggle("hidden", s !== id);
   }
-  // Palkki piilotetaan liittymisen ja Advances-arkin ajaksi: kesken oston
-  // välilehden vaihtaminen hukkaisi valinnat.
+  // The bar is hidden during joining and the Advances sheet: switching tabs
+  // mid-purchase would lose the selections.
   const tabbed = TABBED.includes(id);
   el("tabs").classList.toggle("hidden", !tabbed);
   if (tabbed) {
@@ -377,7 +381,7 @@ const message = (id, text, kind) => {
   node.classList.toggle("hidden", !text);
 };
 
-// localStorage voi heittää privaatti-ikkunassa tai kun evästeet on estetty.
+// localStorage can throw in a private window or when cookies are blocked.
 const session = {
   read() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); }
@@ -385,7 +389,7 @@ const session = {
   },
   write(value) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(value)); }
-    catch (e) { /* istunto elää vain tämän välilehden ajan */ }
+    catch (e) { /* the session then lives only for this tab */ }
   },
   clear() {
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
@@ -413,8 +417,8 @@ async function submitCode() {
   });
   el("code-go").disabled = false;
   if (!ok) {
-    // Sivu kertoo tilanteen omin sanoin: se tietää mitä paikkaa napautettiin,
-    // mihin palvelimen yleinen virheviesti ei yllä.
+    // The page explains in its own words: it knows which seat was tapped,
+    // which the server's generic error message cannot reach.
     const texts = {
       403: "That code did not work. Check it on the TV.",
       429: "Too many attempts. Wait a few minutes.",
@@ -425,7 +429,7 @@ async function submitCode() {
   }
   message("code-msg", "", "info");
   joinCode = code;
-  // Palvelin kertoo kumman koodin se tunnisti; kenttiä on vain yksi.
+  // The server says which code it recognised; there is only one field.
   const role = el("seat-role");
   role.classList.toggle("hidden", !body.elevated);
   if (body.elevated) {
@@ -468,7 +472,7 @@ async function claim(civilization) {
       429: "Too many attempts. Wait a few minutes.",
     };
     message("seat-msg", texts[status] || "Could not join.", "error");
-    // Näytä tuore tilanne: joku muu ehti väliin.
+    // Show the fresh situation: someone else got in first.
     const refreshed = await api("/join/roster", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -483,24 +487,24 @@ async function claim(civilization) {
   enterGame();
 }
 
-// ── pelinäkymä ────────────────────────────────────────────────
+// -- the game view --------------------------------------------
 const CENSUS_DEBOUNCE_MS = 400;
-// Nopea peräkkäinen napautus ehti ennen lähettää toisen komennon ennen kuin
-// ensimmäisen vastaus saapui, jolloin versio oli vanhentunut ja käyttäjä sai
-// turhan konfliktivaroituksen. Nyt näppäily kerätään yhdeksi komennoksi.
+// Rapid successive taps used to send a second command before the first
+// response arrived, so the version was stale and the user got a pointless
+// conflict warning. Now the taps are collected into one command.
 const CITIES_DEBOUNCE_MS = 500;
 const MAX_CITIES = 9;
 const POLL_FALLBACK_MS = 15000;
 
-let me = null;          // näytettävä rivi viimeisimmästä tilannekuvasta
-// Korotettu puhelin katsoo ja muokkaa muitakin rivejä, joten "kenen rivi on
-// näkyvissä" on eri asia kuin "minkä paikan varasin".
+let me = null;          // the row being shown, from the latest snapshot
+// An elevated phone views and edits other rows too, so "whose row is showing"
+// is a different thing from "which seat did I claim".
 let viewing = null;
 let elevated = false;
 let game = null;        // koko tilannekuva
 let censusTimer = null;
 let citiesTimer = null;
-let citiesPending = null;   // näytetty arvo ennen kuin komento on lähtenyt
+let citiesPending = null;   // the displayed value before the command has gone
 let events = null;
 
 function authHeaders() {
@@ -519,7 +523,7 @@ async function refresh() {
   if (!saved) return;
   const { ok, status, body } = await api("/state", { headers: authHeaders() });
   if (status === 401) {
-    // Token ei enää kelpaa — tavallisimmin uusi peli on aloitettu.
+    // The token is no longer valid — most often a new game has been started.
     session.clear();
     if (events) { events.close(); events = null; }
     message("code-msg", "This game has ended. Ask for the new code.", "info");
@@ -531,14 +535,14 @@ async function refresh() {
     return;
   }
   game = body;
-  // Korotus luetaan aina palvelimelta. localStorageen jäänyt vanha tieto
-  // näyttäisi muokkausnapit vielä senkin jälkeen kun paikka on vapautettu.
+  // Elevation is always read from the server. A stale value left in
+  // localStorage would still show the editing controls after a seat's release.
   elevated = !!(body.you && body.you.elevated);
   if (!viewing) viewing = saved.civilization;
   if (!elevated && viewing !== saved.civilization) setViewing(saved.civilization);
   me = body.players.find((p) => p.civilization === viewing) || null;
   if (!me && viewing !== saved.civilization) {
-    // Katsottu rivi katosi — palaa omalle sen sijaan että jäätäisiin tyhjään.
+    // The viewed row is gone — return to your own rather than sit on nothing.
     setViewing(saved.civilization);
     me = body.players.find((p) => p.civilization === viewing) || null;
   }
@@ -553,9 +557,9 @@ async function refresh() {
 function setViewing(civilization) {
   if (viewing === civilization) return;
   viewing = civilization;
-  // Kesken oleva näppäily on jo kiinnitetty omaan riviinsä (ks. changeCities
-  // ja scheduleCensus), joten ajastimia ei tarvitse perua — ne osuvat oikein.
-  // Näytetty arvo sen sijaan kuuluu edelliselle riville.
+  // Any pending input is already bound to its own row (see changeCities and
+  // scheduleCensus), so the timers need not be cancelled — they land right.
+  // The displayed value, on the other hand, belongs to the previous row.
   citiesPending = null;
   el("census").blur();
   message("play-msg", "", "info");
@@ -563,9 +567,9 @@ function setViewing(civilization) {
 
 function render() {
   el("play-civ").textContent = me.civilization;
-  // Väärän pelaajan riville kirjoittaminen on tämän ohjelman pahin virhe, ja
-  // korotettu puhelin tekee siitä mahdollista — nauha on siksi näkyvä ja
-  // pysyy näkyvissä koko ajan, ei vain vaihdon hetkellä.
+  // Writing to the wrong player's row is this program's worst error, and an
+  // elevated phone makes it possible — hence the banner is loud and stays
+  // visible the whole time, not just at the moment of switching.
   const own = (session.read() || {}).civilization;
   const elsewhere = elevated && me.civilization !== own;
   el("other").classList.toggle("hidden", !elsewhere);
@@ -580,8 +584,8 @@ function render() {
   el("tab-me").classList.toggle("elsewhere", elsewhere);
   el("play-rank").textContent = me.rank + ".";
   el("play-total").textContent = me.score.total;
-  // "7 advances" luki aiemmin pisteitä, ei kortteja. Erittely kertoo nyt
-  // kummankin luvun erikseen, jottei niitä voi sekoittaa.
+  // "7 advances" used to read points, not cards. The breakdown now gives
+  // each number separately, so they cannot be confused.
   el("play-parts").textContent =
     me.score.cities + " from cities + " +
     me.score.ast + " from A.S.T. + " +
@@ -589,21 +593,21 @@ function render() {
     (me.score.bonus ? " + " + me.score.bonus + " bonus" : "");
   renderCities();
 
-  // Älä kirjoita kentän päälle kesken kirjoittamisen.
+  // Do not write over the field while it is being typed into.
   const census = el("census");
   if (document.activeElement !== census && censusTimer === null) {
     census.value = me.census;
   }
 
-  // Vaiheportit tulevat palvelimelta, jottei sääntöä tarvitse toistaa täällä.
+  // The phase gates come from the server, so the rule is not repeated here.
   const gates = game.phase_gates || {};
   const inPhase = (command) =>
     !gates[command] || gates[command].includes(game.current_phase);
-  // Korotettu ohittaa portit palvelimella, joten näkymänkin on avattava ne —
-  // muuten käyttöliittymä estäisi juuri sen mitä palvelin ottaisi vastaan.
+  // An elevated phone bypasses the gates on the server, so the view must open
+  // them too — otherwise the UI would forbid what the server would accept.
   const gateOpen = (command) => elevated || inPhase(command);
-  // ...mutta kerrotaan silti kun portti on ohitettu: pelinjohtaja ei saa
-  // kirjata Censusta väärässä vaiheessa huomaamattaan.
+  // ...but still say when a gate has been bypassed: the game master must not
+  // record Census in the wrong phase without noticing.
   const bypassing = (command) => elevated && !inPhase(command);
   const phaseList = (command) => (gates[command] || []).join(" and ");
 
@@ -617,14 +621,14 @@ function render() {
       ? "Census — outside phase " + phaseList("census") + ", editing as admin"
       : "Census — population tokens on the board";
 
-  // Lista avautuu aina: omien korttien katsominen ei ole muokkaamista, ja
-  // pelaajan pitää nähdä mitä hänellä on missä tahansa vaiheessa.
+  // The list always opens: looking at your own cards is not editing, and a
+  // player needs to see what they hold in any phase.
   const canBuy = gateOpen("advances");
   el("cards-open").textContent = !canBuy
     ? "View Advances"
     : bypassing("advances") ? "Edit Advances" : "Buy Advances";
-  // Kultainen korostus vain kun ostaminen on oikeasti mahdollista; muulloin
-  // vaimea, jottei nappi houkuttele vaiheessa jossa siitä ei ole hyötyä.
+  // The gold highlight only when buying is genuinely possible; otherwise
+  // muted, so the button does not tempt in a phase where it is no use.
   el("cards-open").classList.toggle("secondary", !canBuy);
   renderAdvanceSummary();
   renderBoard();
@@ -651,12 +655,12 @@ function renderBoard() {
       "row" + (me && player.civilization === me.civilization ? " self" : "") +
       (elevated ? " pick" : "");
     if (elevated) {
-      // Napautettava pistetaulu on luontevin valitsin: pelinjohtaja näkee
-      // rivin jota on auttamassa ja koskettaa juuri sitä. Erillinen
+      // A tappable scoreboard is the most natural picker: the game master
+      // sees the row they are helping and touches exactly that. A separate
       // pudotusvalikko vaatisi nimen tunnistamisen listasta uudestaan.
       row.onclick = () => {
         setViewing(player.civilization);
-        // Rivi on jo tässä tilannekuvassa, joten piirretään heti eikä jäädä
+        // The row is already in this snapshot, so draw at once rather than
         // odottamaan verkkoa — muuten edellisen rivin luvut vilahtaisivat.
         me = player;
         render();
@@ -678,9 +682,9 @@ function renderBoard() {
 }
 
 async function command(route, payload, civilization) {
-  // Rivi kiinnitetään kutsussa eikä lueta `me`:stä: viivästetty komento kuuluu
-  // sille riville jota napautettiin, ei sille joka sattuu olemaan näkyvissä
-  // kun viive umpeutuu.
+  // The row is bound in the call rather than read from `me`: a delayed command
+  // belongs to the row that was tapped, not to whichever happens to be showing
+  // when the delay expires.
   const civ = civilization || viewing;
   const row = game ? game.players.find((p) => p.civilization === civ) : null;
   if (!row) return;
@@ -689,7 +693,7 @@ async function command(route, payload, civilization) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      // expected_version estää sen, että hidas napautus yliajaisi
+      // expected_version stops a slow tap from overwriting a correction just
       // kannettavalta juuri tehdyn korjauksen.
       body: JSON.stringify({ ...payload, expected_version: row.version, actor: "phone" }),
     }
@@ -728,7 +732,7 @@ function changeCities(delta) {
   const target = Math.max(0, Math.min(MAX_CITIES, citiesShown() + delta));
   if (target === citiesShown()) return;
   citiesPending = target;
-  renderCities();                       // välitön palaute napautukseen
+  renderCities();                       // immediate feedback for the tap
   const civilization = viewing;
   const before = me.cities;
   if (citiesTimer !== null) clearTimeout(citiesTimer);
@@ -742,9 +746,9 @@ function changeCities(delta) {
 }
 
 function scheduleCensus() {
-  // Rivi ja teksti luetaan jo tässä. Jokainen näppäinpainallus ajastaa
-  // uudelleen, joten viimeisin teksti voittaa — ja arvo pysyy sidottuna siihen
-  // riviin jolle se kirjoitettiin, vaikka näkymä ehtisi vaihtua.
+  // The row and the text are read here. Every keystroke reschedules, so the
+  // latest text wins — and the value stays bound to the row it was typed for,
+  // even if the view changes in the meantime.
   const civilization = viewing;
   const raw = el("census").value.trim();
   const before = me ? me.census : null;
@@ -759,14 +763,15 @@ function scheduleCensus() {
 }
 
 function listen() {
-  // Virta kertoo vain että jokin muuttui; varsinainen tila haetaan tokenilla.
+  // The stream only says something changed; the state itself is fetched with
+  // the token.
   if (events) events.close();
   events = new EventSource("/events");
   events.addEventListener("state", () => refresh());
   events.onopen = () => refresh();
   events.onerror = () => bar("Reconnecting…", "warn");
-  // Puhelin katkaisee virran näytön lukituessa; varakysely varmistaa
-  // että näkymä on tuore myös jos yhteys ei palaa itsestään.
+  // A phone drops the stream when the screen locks; the fallback poll makes
+  // sure the view is fresh even if the connection does not come back by itself.
   setInterval(() => { if (document.visibilityState === "visible") refresh(); },
               POLL_FALLBACK_MS);
   document.addEventListener("visibilitychange", () => {
@@ -786,8 +791,8 @@ function enterGame() {
 }
 
 // ── Civilization Advances ─────────────────────────────────────
-// Korttien värit vastaavat työpöytäsovelluksen ryhmävärejä, jotta sama kortti
-// näyttää samalta kummallakin ruudulla.
+// The card colours match the desktop app's group colours, so the same card
+// looks the same on either screen.
 const GROUP_COLORS = {
   ART: "#4471c4", CIVIC: "#d74343", CRAFT: "#ec7c30",
   RELIGION: "#d8bd27", SCIENCE: "#6fac46",
@@ -798,7 +803,7 @@ const GROUP_LABELS = {
 };
 
 let catalogue = null;
-let ordered = [];   // näyttöjärjestys: omistetut ensin, lukittu avaushetkellä
+let ordered = [];   // display order: fixed when the sheet opens
 let selection = null;   // muokattava valinta; tallennetaan vasta Savella
 
 async function openAdvances() {
@@ -813,28 +818,28 @@ async function openAdvances() {
   }
   catalogue = body;
   selection = new Set(body.advances.filter((a) => a.owned).map((a) => a.id));
-  // Järjestys lasketaan kerran avattaessa eikä jokaisella napautuksella: muuten
-  // kortti hyppäisi listan alkuun juuri kun siihen koskee ja seuraava
+  // The order is computed once on opening, not on every tap: otherwise a card
+  // would jump to the top of the list just as it is touched and the next one
   // napautettava siirtyisi sormen alta.
   //
-  // Kolme ryhmää: aiemmilla kierroksilla ostetut, tällä kierroksella ostetut,
-  // ja vielä ostamattomat. Kummankin ostetun ryhmän erottaminen on koko syy
-  // avata arkki uudelleen kesken ostovaiheen — muuten juuri ostettu katoaa
-  // vanhojen sekaan eikä pelaaja näe mitä hän tällä kierroksella otti.
+  // Three groups: bought on earlier turns, bought this turn, and not yet
+  // bought. Separating the two bought groups is the entire reason to reopen
+  // the sheet mid-phase — otherwise what was just bought vanishes among the
+  // old ones and the player cannot see what they took this turn.
   //
-  // Järjestys lasketaan vain avattaessa. Jos ryhmä vaihtuisi napautuksesta,
-  // kortti hyppäisi listalla ylös ja seuraava napautettava siirtyisi sormen
-  // alta — sama virhe jota koko ohjelma yrittää estää.
+  // The order is computed only on opening. If a group changed on a tap, the
+  // card would jump up the list and the next one would move out from under
+  // the thumb — the very error this whole program tries to prevent.
   const group = (a) => (!a.owned ? 2 : a.this_turn ? 1 : 0);
-  // Ryhmän sisällä VP-luokka 1 -> 3 -> 6, koska se on se mitä pelaaja kortista
-  // miettii. `sort` on vakaa, joten sen sisällä säilyy taulukon järjestys.
+  // Within a group the VP band 1 -> 3 -> 6, because that is what a player
+  // weighs up. `sort` is stable, so the sheet's order survives inside it.
   ordered = [...body.advances].sort(
     (a, b) => group(a) - group(b) || a.vp - b.vp
   );
   renderAdvances();
-  // Arkki on pelaajan mielestä oma näkymänsä, joten laitteen paluuele saa
-  // sulkea sen sivulta poistumisen sijaan. Merkintä kulutetaan jokaisessa
-  // uloskäynnissä, muuten pino kasvaisi joka avauksella.
+  // The sheet is a view of its own to the player, so the device's back
+  // gesture may close it rather than leave the page. The entry is consumed on
+  // every exit, otherwise the stack would grow with each opening.
   history.pushState({ view: "cards" }, "");
   show("cards");
   window.scrollTo(0, 0);
@@ -853,8 +858,8 @@ function renderCredits() {
 }
 
 function advancesEditable() {
-  // Sama poikkeus kuin päänäkymässä: korotettu saa korjata kortit myös
-  // vaiheen ulkopuolella, koska palvelin hyväksyy sen.
+  // The same exception as in the main view: an elevated phone may fix cards
+  // outside the phase too, because the server accepts it.
   if (elevated) return true;
   const phases = (game && game.phase_gates && game.phase_gates.advances) || [];
   return !game || phases.length === 0 || phases.includes(game.current_phase);
@@ -863,16 +868,16 @@ function advancesEditable() {
 function renderAdvances() {
   renderCredits();
   const editable = advancesEditable();
-  // Omistetut, ei ostoskoria: valinta muuttuu vasta tallennuksessa, joten
-  // kesken olevan oston laskeminen mukaan väittäisi pisteitä joita ei vielä ole.
+  // What is owned, not what is in the basket: the selection only takes effect
+  // on save, so counting a pending purchase would claim points not yet held.
   const held = catalogue.advances.filter((a) => a.owned);
   const points = held.reduce((sum, a) => sum + a.vp, 0);
   el("cards-sub").textContent =
     held.length + " owned · " + points + " VP" +
     (editable ? "" : " · view only");
 
-  // Hinta lasketaan vain korteista joita ei vielä omista: jo ostetuista ei
-  // makseta uudelleen.
+  // The price counts only cards not yet owned: what is already bought is not
+  // paid for again.
   const buying = catalogue.advances.filter(
     (a) => selection.has(a.id) && !a.owned
   );
@@ -890,9 +895,9 @@ function renderAdvances() {
     const button = document.createElement("button");
     button.className =
       "card" + (chosen ? " owned" : "") + (advance.locked ? " locked" : "");
-    // Kaksivärinen kortti saa molemmat värinsä: alennus lasketaan kummasta
-    // tahansa altaasta (suuremmasta), joten yhden värin näyttäminen kertoisi
-    // kortista puolet.
+    // A two-colour card gets both of its colours: the discount comes from
+    // either pool (the larger one), so showing one colour would tell half the
+    // card's story.
     const bands = advance.groups.map((g) => GROUP_COLORS[g]);
     const band = bands.length === 1
       ? bands[0]
@@ -903,9 +908,9 @@ function renderAdvances() {
           return `${c} ${from}% ${to}%`;
         }).join(", ") + ")";
 
-    // Hinta piilotetaan vain jo omistetulta kortilta: se on maksettu. Ostoon
-    // valittu kortti näyttää yhä hintansa — se on juuri se mitä pelaaja on
-    // maksamassa, eikä sitä saa korvata pistearvolla.
+    // The price is hidden only on an already-owned card: it has been paid. A
+    // card selected for purchase still shows its price — that is exactly what
+    // the player is about to pay, and it must not be replaced by a VP value.
     const discounted = advance.effective_cost < advance.cost;
     const price = advance.owned
       ? `<div class="price"></div>`
@@ -913,16 +918,16 @@ function renderAdvances() {
         (discounted ? `<div class="was">${advance.cost}</div>` : "") +
         `<div class="now">${advance.effective_cost}</div></div>`;
 
-    // Lukittu kortti on aina myös valittu, joten merkki on sama ✓. Eron tekee
-    // väri — `.card.locked .tick` vaimentaa sen — ja se ettei jo ostetulla
-    // kortilla ole enää hintaa näkyvissä. Emojia ei käytetä: se oli ainoa koko
-    // listassa ja piirtyy joka laitteella eri kokoisena.
+    // A locked card is always selected too, so the mark is the same ✓. The
+    // difference is the colour — `.card.locked .tick` mutes it — and that an
+    // already-bought card shows no price. No emoji is used: it was the only
+    // one in the whole list and renders at a different size on every device.
     button.innerHTML =
       `<span class="band" style="background:${band}"></span>` +
       `<span class="tick">${chosen ? "✓" : ""}</span>` +
       `<span class="body"><div class="nm">${advance.name}</div></span>` +
       `<div class="vp"><b>${advance.vp}</b><i>VP</i></div>` + price;
-    // Aiempien kierrosten kortit on jo ostettu: niitä ei voi perua.
+    // Cards from earlier turns are already bought: they cannot be undone.
     button.disabled = !editable || advance.locked;
     if (editable && !advance.locked) {
       button.onclick = () => {
@@ -972,7 +977,7 @@ function renderAdvanceSummary() {
     count + (count === 1 ? " card · " : " cards · ") + me.score.advances + " VP";
 }
 
-// ── vedä päivittääksesi ───────────────────────────────────────
+// -- pull to refresh ------------------------------------------
 const PULL_THRESHOLD = 70;   // px ennen kuin ele laukeaa
 let pullStart = null;
 let pulled = 0;
@@ -1003,9 +1008,9 @@ scroller.addEventListener("touchstart", (event) => {
 scroller.addEventListener("touchmove", (event) => {
   if (pullStart === null) return;
   const delta = event.touches[0].clientY - pullStart;
-  // Sormi liikkui ylös tai lista ehti vieriä: ele ei ole enää vetoa.
+  // The finger moved up or the list scrolled: the gesture is no longer a pull.
   if (delta <= 0 || scroller.scrollTop > 0) { pullReset(); return; }
-  // Jarrutus, jotta veto tuntuu kumiselta eikä seuraa sormea yksi yhteen.
+  // Damping, so the pull feels rubbery rather than tracking the finger 1:1.
   pulled = Math.min(delta * 0.5, PULL_THRESHOLD + 20);
   pullIndicator(
     pulled,
@@ -1048,16 +1053,16 @@ el("cards-open").onclick = openAdvances;
 el("cards-cancel").onclick = () => { closeCards(); };
 
 function closeCards() {
-  // back() laukaisee popstaten, joka tekee varsinaisen näkymänvaihdon — yksi
-  // reitti ulos riippumatta siitä painoiko käyttäjä Cancelia vai laitteen
-  // paluunappia.
+  // back() fires popstate, which does the actual view change — one route out
+  // whether the user pressed Cancel or the device's back button.
+  //
   if (history.state && history.state.view === "cards") history.back();
   else show("play");
 }
 
 window.addEventListener("popstate", () => {
-  // Vain arkki on suljettavissa näin. Muualla paluu saa poistua sivulta,
-  // kuten selaimessa kuuluukin.
+  // Only the sheet is closable this way. Elsewhere back may leave the page,
+  // as it should in a browser.
   if (view === "cards") show("play");
 });
 el("cards-save").onclick = saveAdvances;
@@ -1072,8 +1077,8 @@ el("code").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitCode();
 });
 el("seat-back").onclick = () => { show("join-code"); };
-// Tallennettu istunto vie suoraan pelinäkymään, joten puhelimen lukitus tai
-// selaimen sulkeminen ei vaadi uutta liittymistä.
+// A saved session goes straight to the game view, so locking the phone or
+// closing the browser does not require joining again.
 if (session.read()) { enterGame(); } else { show("join-code"); }
 </script>
 </body>

@@ -1,4 +1,4 @@
-"""Pelissä käytettävä muuttumaton perustieto."""
+"""Immutable reference data for the game."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ CIVILIZATIONS = tuple(Civilization(*row) for row in _CIVILIZATION_ROWS)
 CIVILIZATION_BY_NAME = {civilization.name: civilization for civilization in CIVILIZATIONS}
 
 
-# Kortit on ryhmitelty Advancement Reference v3 -tiedoston riveittäin.
+# Cards are grouped by the rows of the Advancement Reference v3 sheet.
 _ADVANCE_ROWS = (
     ("Mysticism", 50, ("ART", "RELIGION")),
     ("Monument", 180, ("CRAFT", "RELIGION")),
@@ -112,9 +112,9 @@ _ADVANCE_ROWS = (
     ("Advanced Military", 240, ("CIVIC",)),
 )
 
-# Korttien alareunaan painetut pysyvät värikrediitit. Ryhmät ovat:
-# ART=sininen, CIVIC=punainen, CRAFT=oranssi, RELIGION=keltainen,
-# SCIENCE=vihreä.
+# The permanent colour credits printed along the bottom of each card.
+# The groups are ART=blue, CIVIC=red, CRAFT=orange, RELIGION=yellow,
+# SCIENCE=green.
 ADVANCE_GROUPS = ("ART", "CIVIC", "CRAFT", "RELIGION", "SCIENCE")
 _ADVANCE_CREDITS = {
     "Mysticism": (("ART", 5), ("RELIGION", 5)),
@@ -206,7 +206,7 @@ ADVANCES = tuple(
 )
 ADVANCE_BY_ID = {advance.id: advance for advance in ADVANCES}
 
-# Advancement Reference -taulukon jokainen vaakarivi on 1 VP → 3 VP → 6 VP.
+# Every horizontal row of the Advancement Reference is 1 VP -> 3 VP -> 6 VP.
 ADVANCE_CHAINS = tuple(
     tuple(advance.id for advance in ADVANCES[index : index + 3])
     for index in range(0, len(ADVANCES), 3)
@@ -232,8 +232,9 @@ AST_ERA_NAMES = (
 )
 AST_ERA_ABBREVIATIONS = ("SA", "EBA", "MBA", "LBA", "EIA", "LIA")
 
-# Kunkin aikakauden ensimmäinen askel 18 pelaajan Basic A.S.T.:lla.
-# Lähtöruutu 0 kuuluu Stone Ageen. Rajat on luettu AST_1–AST_3-kuvista.
+# The first step of each era on the 18-player Basic A.S.T.
+# Starting square 0 belongs to the Stone Age. The boundaries were read off
+# the A.S.T. component.
 _BASIC_DEFAULT_STARTS = (0, 5, 8, 11, 14, 15)
 _BASIC_LATE_EARLY_BRONZE_STARTS = (0, 6, 9, 11, 14, 15)
 _BASIC_LONG_EARLY_BRONZE_STARTS = (0, 5, 9, 11, 14, 15)
@@ -258,7 +259,7 @@ def ast_era_index(
     player_count: int | None = None,
     game_mode: str | None = None,
 ) -> int:
-    """Palauta sivilisaation aikakauden indeksi annetulla AST-askeleella."""
+    """Return the civilization's era index at the given A.S.T. step."""
 
     if ast_variant.upper() != "BASIC":
         raise ValueError("Expert A.S.T. era boundaries have not been added yet.")
@@ -275,8 +276,8 @@ def ast_era_index(
     return era_index
 
 
-# Perussääntöjen sivujen 12–13 ja Additional Scenarios -oppaan sivujen
-# 20–22 viralliset oletuskokoonpanot. Järjestys noudattaa AST-rankingia.
+# The official default setups from Basic Rulebook pp. 12-13 and the
+# Additional Scenarios booklet pp. 20-22. Ordered by A.S.T. ranking.
 _WEST_SETUPS = {
     3: ("Minoa", "Hatti", "Hellas"),
     4: ("Minoa", "Assyria", "Hatti", "Hellas"),
@@ -497,7 +498,7 @@ def basic_ast_era_starts(
     player_count: int | None = None,
     game_mode: str | None = None,
 ) -> tuple[int, ...]:
-    """Palauta Basic A.S.T.:n rajat, myös 3 pelaajan East-poikkeuksella."""
+    """Return the Basic A.S.T. boundaries, including the 3-player East exception."""
 
     starts = BASIC_AST_ERA_STARTS[civilization_name]
     if (
@@ -510,11 +511,11 @@ def basic_ast_era_starts(
 
 
 def default_block(civilization_name: str, player_count: int) -> str:
-    """Palauta skenaarion tavallisen kartta-asettelun kauppalohko.
+    """Return the trade block for the scenario's standard map layout.
 
-    14 pelaajan pelissä Assyria ja Egypt kuuluvat EAST-lohkoon.
-    15–16 pelaajan peleissä Assyria kuuluu EAST-lohkoon.
-    Muut käyttävät oman pelilaatikkonsa mukaista oletuslohkoa.
+    In a 14-player game Assyria and Egypt belong to the EAST block.
+    In 15-16 player games Assyria belongs to the EAST block.
+    Everyone else uses the default block of their own game box.
     """
 
     if player_count in {10, 11}:

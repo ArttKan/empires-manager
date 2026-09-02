@@ -1,8 +1,9 @@
-"""RemoteGameService oikeaa HTTP-palvelinta vasten.
+"""RemoteGameService against a real HTTP server.
 
-Ei stubattua vastausta: testi nostaa pystyyn saman FastAPI-sovelluksen joka ajaa
-palvelimella ja puhuu sille `urllib`illa. Näin `remote.py` ja `main.py` eivät voi
-ajautua erilleen huomaamatta — juuri se olisi vika joka näkyisi vasta pelipöydässä.
+No stubbed responses: the test stands up the same FastAPI application that runs
+on the server and talks to it with `urllib`. That way `remote.py` and `main.py`
+cannot drift apart unnoticed — precisely the kind of fault that would otherwise
+only show up at the table.
 """
 
 import importlib.util
@@ -157,7 +158,7 @@ class RemoteServiceTests(unittest.TestCase):
 
         self.assertEqual(result.player.flexible_credits["ART"], 10)
 
-    # -- virheiden kääntäminen ----------------------------------------------
+    # -- error translation --------------------------------------------------
 
     def test_unknown_player_becomes_unknown_player(self) -> None:
         with self.assertRaises(UnknownPlayer):
@@ -193,7 +194,7 @@ class RemoteServiceTests(unittest.TestCase):
             wrong.snapshot()
 
     def test_unreachable_server_becomes_service_unavailable(self) -> None:
-        """Verkkovirhe ei saa näyttää sääntörikkomukselta."""
+        """A network error must not look like a rule violation."""
 
         dead = RemoteGameService(
             f"http://127.0.0.1:{_free_port()}", TOKEN, timeout=0.3
@@ -203,11 +204,11 @@ class RemoteServiceTests(unittest.TestCase):
             dead.snapshot()
 
     def test_requests_identify_themselves(self) -> None:
-        """Cloudflare torjuu urllibin oletus-User-Agentin 403:lla.
+        """Cloudflare rejects urllib's default User-Agent with a 403.
 
-        Testipalvelin ei ole Cloudflaren takana, joten tämä ei paljastuisi
-        muuten kuin oikeaa palvelinta vasten — siksi otsake tarkistetaan
-        suoraan pyynnöstä.
+        The test server is not behind Cloudflare, so this would show up only
+        against the real host — hence the header is checked straight off the
+        request.
         """
 
         captured = {}
@@ -223,7 +224,7 @@ class RemoteServiceTests(unittest.TestCase):
         self.assertEqual(captured["ua"], USER_AGENT)
         self.assertNotIn("Python-urllib", captured["ua"])
 
-    # -- ylläpito ------------------------------------------------------------
+    # -- administration ------------------------------------------------------
 
     def test_join_status_reports_code_and_seats(self) -> None:
         store = TokenStore.create(

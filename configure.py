@@ -1,19 +1,19 @@
-"""Kirjoita palvelinasetukset työpöytäsovellusta varten.
+"""Write the server settings for the desktop app.
 
-Käyttö:
-    python configure.py                              kysyy arvot
-    python configure.py --server URL --token TOKEN   suoraan, ilman kysymyksiä
-    python configure.py --local                      poistaa asetukset
+Usage:
+    python configure.py                              asks for the values
+    python configure.py --server URL --token TOKEN   directly, no questions
+    python configure.py --local                      removes the settings
 
-Tarkoitettu jaettavaksi peliporukalle, erityisesti Windowsissa, jossa
-asetustiedoston polku (`%USERPROFILE%\\.config\\mega-empires\\config.json`) on
-epätavallinen eikä kukaan arvaisi sitä.
+Meant to be handed to the gaming group, especially on Windows where the config
+file path (`%USERPROFILE%\\.config\\mega-empires\\config.json`) is unusual and
+nobody would guess it.
 
-Skripti käyttää sovelluksen omaa `config`-moduulia, joten polku ei voi erkaantua
-siitä mitä sovellus tosiasiassa lukee. Vain vakiokirjastoa: tämä ajetaan samalla
-Pythonilla kuin sovelluskin, ilman venviä.
+The script uses the app's own `config` module, so the path cannot drift from
+what the app actually reads. Standard library only: this runs on the same
+Python as the app, without the venv.
 
-Aja: python configure.py
+Run: python configure.py
 """
 
 import argparse
@@ -28,7 +28,7 @@ from src.client.config import config_path, load_server_config  # noqa: E402
 
 
 def _mask(secret: str) -> str:
-    """Näytä sen verran että arvon tunnistaa, ei enempää."""
+    """Show just enough to recognise the value, no more."""
 
     if len(secret) <= 8:
         return "*" * len(secret)
@@ -36,12 +36,12 @@ def _mask(secret: str) -> str:
 
 
 def _ask(prompt: str, current: str, secret: bool = False) -> str:
-    """Kysy arvo. Token näkyy kirjoitettaessa.
+    """Ask for a value. The token is visible as it is typed.
 
-    Aiemmin käytettiin `getpass`ia, mutta se lukee merkkejä yksitellen
-    `msvcrt`:llä eikä liittäminen toimi PowerShellissä. Tokenin piilottaminen ei
-    ole sen arvoista että arvoa ei saa liitettyä: käyttäjä asettaa sitä omalle
-    koneelleen ja on juuri saanut sen jostain mistä sen näkee muutenkin.
+    This used `getpass` before, but that reads characters one at a time through
+    `msvcrt` and pasting does not work in PowerShell. Hiding the token is not
+    worth being unable to paste it: the user is setting it on their own machine
+    and has just received it from somewhere they can read it anyway.
     """
 
     shown = _mask(current) if secret and current else current
@@ -50,9 +50,9 @@ def _ask(prompt: str, current: str, secret: bool = False) -> str:
 
 
 def _check(url: str, token: str) -> None:
-    """Kokeile yhteyttä samalla asiakkaalla jota sovellus käyttää.
+    """Try the connection with the same client the app uses.
 
-    Näin väärä token huomataan heti eikä vasta pelipöydässä.
+    That way a wrong token is noticed straight away and not at the table.
     """
 
     from src.client.remote import RemoteGameService
@@ -108,8 +108,8 @@ def main() -> int:
             print("Nothing to remove.")
         return 0
 
-    # Suoraan annetut arvot ohittavat kysymykset, jotta ohjeen voi lähettää
-    # yhtenä valmiina komentona.
+    # Values given directly skip the questions, so the instructions can be sent
+    # as a single ready-made command.
     if options.server and options.token:
         return _write(path, options.server, options.token, not options.no_test)
 
@@ -123,7 +123,7 @@ def main() -> int:
     print('Type "local" as the server to remove the settings and play offline.\n')
 
     url = _ask("Server address", existing.url if existing else "")
-    # Tyhjä syöte säilyttää nykyisen arvon, joten poistolle tarvitaan oma sana.
+    # Empty input keeps the current value, so removal needs a word of its own.
     if url.lower() in {"local", "none", "-"}:
         if path.is_file():
             path.unlink()
@@ -156,8 +156,8 @@ def _write(path: Path, url: str, token: str, test: bool) -> int:
         encoding="utf-8",
     )
     try:
-        # Vaikuttaa vain POSIXissa; Windowsissa tiedosto perii kotihakemiston
-        # oikeudet, mikä on käytännössä sama asia yhden käyttäjän koneella.
+        # Only has an effect on POSIX; on Windows the file inherits the home
+        # directory's permissions, which is much the same on a single-user machine.
         path.chmod(0o600)
     except OSError:
         pass
@@ -182,8 +182,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nCancelled.")
         code = 1
-    # Windowsissa skriptin voi käynnistää kaksoisnapsautuksella, jolloin ikkuna
-    # sulkeutuisi heti eikä tulostetta ehtisi lukea.
+    # On Windows the script can be launched by double-clicking, and the window
+    # would close immediately with no chance to read the output.
     if os.name == "nt":
         input("\nPress Enter to close.")
     sys.exit(code)

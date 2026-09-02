@@ -1,4 +1,4 @@
-"""Tkinter-käyttöliittymä Mega Empires -peliseurannalle."""
+"""The Tkinter user interface for the Mega Empires score tracker."""
 
 from __future__ import annotations
 
@@ -69,24 +69,24 @@ MUTED = "#aeb9c7"
 ACCENT = "#d6a642"
 ERROR = "#b94141"
 
-# Etäpalvelinta käytettäessä muutokset voivat tulla puhelimista, joten näkymä
-# kysyy tuoretta tilaa ajastimella. Kysely on halpa: se vertaa vain
-# state_versionia eikä piirrä mitään jos mikään ei muuttunut.
+# Against a remote server, changes can arrive from phones, so the view polls
+# for fresh state on a timer. The poll is cheap: it only compares
+# state_version and draws nothing if nothing changed.
 POLL_INTERVAL_MS = 2000
-# Yhteyden katkettua kysely harvenee: urllib on estävä, joten tiheä kysely
-# kuollutta palvelinta vasten jumittaisi käyttöliittymän aikakatkaisun ajaksi.
+# After a dropped connection the poll slows down: urllib blocks, so hammering
+# a dead server would freeze the UI for the length of each timeout.
 POLL_BACKOFF_MS = 15000
-# Census-kenttä kirjoittaa jokaisella näppäimen nousulla. Paikallisesti se on
-# ilmaista, verkon yli se olisi pyyntö per merkki.
+# The Census field writes on every key release. Locally that is free; over the
+# network it would be one request per character.
 CENSUS_DEBOUNCE_MS = 400
-# Etätilassa pelitila peilataan paikalliseen tiedostoon aina kun se
-# muuttuu. Ilman peiliä varatila olisi hyödytön: peli on palvelimella, joten
-# ilman kopiota paikallinen tila aloittaisi tyhjästä kesken pelin.
+# In remote mode the game state is mirrored to a local file whenever it
+# changes. Without the mirror the fallback would be useless: the game lives on
+# the server, so without a copy the local mode would start from nothing.
 MIRROR_SAVE_NAME = "palvelinpeli"
 
-# Yhteyskatkon ohje. Peilikopio on levyllä, mutta siihen pääsee käsiksi vain
-# käynnistyksen kautta (`_offer_offline`), joten katkon sattuessa käyttäjälle on
-# kerrottava reitti — muuten näkymä vain jähmettyy eikä mikään kerro mitä tehdä.
+# The outage hint. The mirror is on disk, but it is only reachable through
+# startup (`_offer_offline`), so on an outage the user has to be told the way
+# out — otherwise the view simply freezes and nothing says what to do.
 OFFLINE_HINT = "Restart the app to continue on this computer."
 AST_ERA_COLORS = (
     "#354252",
@@ -127,7 +127,7 @@ def _valid_credit_allocation(values: dict[str, int], amount: int) -> bool:
         )
     )
 
-# Basic Rulebookin takasivun tiivistetyt oletusarvot.
+# The condensed defaults from the back page of the Basic Rulebook.
 DEFAULT_RULES_VALUES = (
     ("1  Tax", "2 tokens per city: stock → treasury"),
     ("2  Expansion", "1 token → +1  •  2+ tokens → +2"),
@@ -161,7 +161,7 @@ DEFAULT_RULES_VALUES = (
     ("", "Expert, 0 cities: move back 1 outside Stone Age"),
 )
 
-# Vaihekohtaiset suoraan vaikuttavat kortit ja pelaajalistan lyhenteet.
+# Per-phase directly relevant cards and the player list abbreviations.
 PHASE_AFFECTING_ADVANCES = {
     1: (
         ("coinage", "COI"),
@@ -273,11 +273,11 @@ def _configure_styles(root: tk.Tk) -> None:
 
 
 def _destination_banner(parent: tk.Widget, text: str) -> tk.Widget:
-    """Kertoo mihin peli tallentuu.
+    """Says where the game will be saved.
 
-    Ilman tätä uuden pelin velho ja tallennusvalinta näyttävät identtisiltä
-    riippumatta siitä ollaanko paikallisessa vai etätilassa, eikä käyttäjä voi
-    tietää päätyykö peli koneelle vai palvelimelle.
+    Without this the new-game wizard and the save picker look identical whether
+    the app is in local or remote mode, and the user cannot tell whether the
+    game ends up on this machine or on the server.
     """
 
     frame = tk.Frame(
@@ -302,7 +302,7 @@ def _destination_banner(parent: tk.Widget, text: str) -> tk.Widget:
 
 
 class NewGameWizard(tk.Toplevel):
-    """Ohjattu uuden pelin perustaminen."""
+    """The guided new-game setup."""
 
     def __init__(
         self,
@@ -311,11 +311,11 @@ class NewGameWizard(tk.Toplevel):
         destination: str = "",
         ask_name: bool = True,
     ) -> None:
-        """`destination` kertoo mihin peli päätyy, `ask_name` kysytäänkö nimi.
+        """`destination` says where the game lands, `ask_name` whether to ask for one.
 
-        Etätilassa nimeä ei kysytä, koska palvelin tallentaa pelin aina samaan
-        paikkaan: kysytty nimi jäisi käyttämättä, mikä on pahempaa kuin sen
-        puuttuminen.
+        In remote mode no name is asked for, because the server always saves to
+        the same place: a name that was asked for and then ignored is worse
+        than not asking at all.
         """
 
         super().__init__(parent)
@@ -363,9 +363,9 @@ class NewGameWizard(tk.Toplevel):
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(0, 12))
 
-        # Nappi pakataan ennen muuta sisältöä: pack jakaa tilan pakkausjärjestyksessä,
-        # joten viimeisenä pakattu side="bottom" -nappi jäi leikkautumaan pois heti
-        # kun sisältö kasvoi (esim. kohdebanneri) ikkunaa korkeammaksi.
+        # The button is packed before the rest of the content: pack allocates space in
+        # packing order, so a side="bottom" button packed last was clipped away as
+        # soon as the content (the destination banner, say) grew taller than the window.
         ttk.Button(
             self.content,
             text="Next",
@@ -388,8 +388,8 @@ class NewGameWizard(tk.Toplevel):
                 font=("Segoe UI", 13),
                 width=32,
             ).pack(side="right", fill="x", expand=True, padx=(24, 0))
-        # Etätilassa nimeä ei kysytä eikä käytetä: peli menee palvelimelle,
-        # ja `_install_remote_game` ohittaa polun kokonaan.
+        # In remote mode the name is neither asked for nor used: the game goes to the
+        # server, and `_install_remote_game` skips the path entirely.
 
         mode_frame = ttk.LabelFrame(self.content, text="Game boxes", padding=14)
         mode_frame.pack(fill="x", pady=(0, 20))
@@ -458,10 +458,10 @@ class NewGameWizard(tk.Toplevel):
 
     def _start_players(self) -> None:
         self._update_mode_rules()
-        # Nimi tarkistetaan vain kun se on kysytty. Etätilassa peli menee
-        # palvelimelle eikä paikallista polkua käytetä, joten nimen
-        # validointi vertaisi kiinteää täytenimeä paikallisiin tallennuksiin
-        # — ja törmäisi juuri palvelinpelin peilikopioon.
+        # The name is only validated when it was asked for. In remote mode the game
+        # goes to the server and no local path is used, so validating the name would
+        # compare a fixed placeholder against the local saves — and would collide
+        # with the mirror copy of the server game itself.
         if self.ask_name:
             try:
                 save_path = save_path_for_name(self.save_name.get())
@@ -607,7 +607,7 @@ class NewGameWizard(tk.Toplevel):
 
 
 class FlexibleCreditDialog(tk.Toplevel):
-    """Written Recordin tai Monumentin krediittien pakollinen kohdistus."""
+    """The mandatory assignment of Written Record's or Monument's credits."""
 
     def __init__(
         self,
@@ -913,10 +913,10 @@ class AdvanceDialog(tk.Toplevel):
         return values
 
     def _discounting_advances(self) -> list[str]:
-        """Kortit joista alennus lasketaan: vain aiempien kierrosten ostot.
+        """The cards the discount is computed from: earlier turns' purchases only.
 
-        Hankintavaihe on yhtäaikainen, joten saman kierroksen kortit eivät
-        alenna toisiaan silloinkaan kun ostot kirjataan useassa erässä.
+        The acquisition phase is simultaneous, so cards from the same turn do
+        not discount each other even when recorded in several batches.
         """
 
         return discount_advances(self.player, self.game.round_number)
@@ -1251,8 +1251,8 @@ class PlayerDialog(tk.Toplevel):
             )
             return
 
-        # A.S.T.-bonuksen säännöt tarkistaa service.validate_ast_bonus(); tässä
-        # ollut kopio poistettiin, jotta sääntö ei voi erkaantua ytimestä.
+        # The A.S.T. bonus rules are checked by service.validate_ast_bonus(); the copy
+        # that used to be here was deleted so the rule cannot drift from the core.
         if not self.on_save(
             nickname,
             self.block.get(),
@@ -1267,7 +1267,7 @@ class PlayerDialog(tk.Toplevel):
 
 
 class SavedGameDialog(tk.Toplevel):
-    """Tallennetun pelin valinta tai uuden pelin aloitus."""
+    """Choosing a saved game, or starting a new one."""
 
     def __init__(
         self,
@@ -1391,7 +1391,7 @@ def _add_current_advance_holders(
     *,
     table_height: int = 4,
 ) -> None:
-    """Lisää popupiin nykyisestä pelitilanteesta laskettu omistajalista."""
+    """Add to the popup a holder list computed from the current game state."""
 
     section = tk.Frame(parent, background=PANEL_ALT)
     section.pack(fill="x", pady=5)
@@ -1457,7 +1457,7 @@ def _add_current_advance_holders(
 
 
 class VolcanicEruptionDialog(tk.Toplevel):
-    """Volcanic Eruption -kortin ratkaisuohje."""
+    """The resolution instructions for the Volcanic Eruption card."""
 
     def __init__(self, parent: tk.Widget, game: GameState) -> None:
         super().__init__(parent)
@@ -1643,7 +1643,7 @@ class VolcanicEruptionDialog(tk.Toplevel):
 
 
 class CivilWarDialog(tk.Toplevel):
-    """Civil War -kortin pitkä ratkaisuohje."""
+    """The long resolution instructions for the Civil War card."""
 
     AFFECTING_ADVANCES = (
         ("music", "Music"),
@@ -2268,7 +2268,7 @@ CALAMITY_DIALOG_SPECS = {
 
 
 class MajorCalamityDialog(tk.Toplevel):
-    """Yhteinen popup Stackien 2–5 Major Calamity -ohjeille."""
+    """A shared popup for the Major Calamity instructions of Stacks 2-5."""
 
     def __init__(
         self,
@@ -2422,8 +2422,8 @@ class MajorCalamityDialog(tk.Toplevel):
 class MegaEmpiresApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        # self.game on piirtovälimuisti: kopio siitä mitä palvelu viimeksi
-        # kertoi, ei toinen totuus. Kaikki muutokset kulkevat self.servicen läpi.
+        # self.game is a render cache: a copy of what the service last reported, not
+        # a second truth. Every change goes through self.service.
         self.game: GameState | None = None
         self.service: LocalGameService | None = None
         self.save_path: Path | None = None
@@ -2494,19 +2494,19 @@ class MegaEmpiresApp:
             self._startup()
 
     def _connect_remote(self, config) -> None:
-        """Liity palvelimella olevaan peliin.
+        """Join the game on the server.
 
-        Palvelin on normaali tila. Jos siihen ei saada yhteyttä, tarjotaan
-        paikallista varatilaa — mieluiten peilistä, jotta kesken oleva peli
-        jatkuu eikä ala alusta.
+        The server is the normal mode. If it cannot be reached, the local
+        fallback is offered — preferably from the mirror, so a game in progress
+        continues rather than starting over.
         """
 
         service = RemoteGameService(config.url, config.token)
         try:
             game = service.snapshot()
         except ServiceUnavailable as error:
-            # 503 tarkoittaa "yhteys on, mutta peliä ei ole" — silloin oikea
-            # vastaus on velho eikä varatila. Muut syyt ovat aitoja katkoja.
+            # 503 means "there is a connection but no game" — the right answer then is
+            # the wizard, not the fallback. Other causes are genuine outages.
             if "No saved game" in str(error):
                 self.service = service
                 self.save_path = None
@@ -2537,11 +2537,11 @@ class MegaEmpiresApp:
         self._poll()
 
     def _offer_offline(self, reason: str) -> None:
-        """Tarjoa paikallista tilaa kun palvelinta ei tavoiteta.
+        """Offer local mode when the server cannot be reached.
 
-        Peiliä ei avata automaattisesti, vaan se esivalitaan listasta. Käyttäjä
-        voi silti valita toisen tallennuksen tai aloittaa uuden pelin — ohjelma
-        ei päätä hänen puolestaan mitä peliä ollaan pelaamassa.
+        The mirror is not opened automatically, only preselected in the list.
+        The user can still pick a different save or start a new game — the
+        program does not decide for them which game is being played.
         """
 
         mirror = self._mirror_path()
@@ -2562,24 +2562,24 @@ class MegaEmpiresApp:
         return save_path_for_name(MIRROR_SAVE_NAME)
 
     def _mirror_state(self, game: GameState) -> None:
-        """Kirjoita palvelimen tila paikalliseen kopioon.
+        """Write the server's state to the local copy.
 
-        Kutsutaan vain kun versio on muuttunut, joten kirjoituksia tulee
-        muutosten tahtiin eikä kyselyn tahtiin.
+        Called only when the version has changed, so writes happen at the pace
+        of changes rather than the pace of polling.
         """
 
         try:
             save_game(game, self._mirror_path())
         except OSError:
-            # Peilin epäonnistuminen ei saa keskeyttää peliä.
+            # A failed mirror write must never interrupt the game.
             pass
 
     def _teardown_view(self) -> None:
-        """Pura päänäkymä ja merkitse se puretuksi.
+        """Tear down the main view and mark it as torn down.
 
-        `_poll()` käy ajastimella myös velhon aikana. Jos se piirtäisi silloin,
-        se koskisi juuri tuhottuihin widgetteihin — Tk kaatuu siihen
-        "invalid command name" -virheeseen.
+        `_poll()` keeps running on its timer during the wizard too. If it drew
+        then, it would touch just-destroyed widgets — Tk fails on that with an
+        "invalid command name" error.
         """
 
         self._view_live = False
@@ -2595,7 +2595,7 @@ class MegaEmpiresApp:
         )
 
     def _install_remote_game(self, game: GameState, _path: Path | None) -> None:
-        """Lähetä velhon luoma peli palvelimelle ja jatka siitä."""
+        """Send the wizard's game to the server and continue from there."""
 
         service = self.service
         if not isinstance(service, RemoteGameService):
@@ -2623,20 +2623,20 @@ class MegaEmpiresApp:
         self._build_main_view()
 
     def _poll(self) -> None:
-        """Hae tuore tila palvelimelta ja piirrä vain jos versio muuttui."""
+        """Fetch fresh state from the server and redraw only if the version moved."""
 
         if not isinstance(self.service, RemoteGameService):
             return
         delay = POLL_INTERVAL_MS
         if not getattr(self, "_view_live", False):
-            # Velho tai tallennusvalinta on auki: ei ole mitään piirrettävää.
-            # Ajastin jää käyntiin, jotta kysely jatkuu kun näkymä palaa.
+            # The wizard or the save picker is open: there is nothing to draw.
+            # The timer keeps running so polling resumes when the view returns.
             self._poll_job = self.root.after(delay, self._poll)
             return
         try:
             snapshot = self.service.snapshot()
         except CommandError as error:
-            # Yhteyskatko ei ole pelitilan muutos: näkymä jätetään ennalleen.
+            # A dropped connection is not a change of game state: the view is left as is.
             self._set_connected(False, str(error))
             delay = POLL_BACKOFF_MS
         else:
@@ -2648,14 +2648,14 @@ class MegaEmpiresApp:
                 self.game = snapshot
                 self._mirror_state(snapshot)
                 self._refresh_all()
-            # Liittyminen ei muuta pelitilaa eikä siis state_versionia, mutta
-            # se näkyy pistetaulun riveillä — herätetään piirto erikseen.
+            # Joining changes no game state and therefore no state_version, but it does
+            # show on the scoreboard rows — trigger that redraw separately.
             claims = self.service.claims()
             if claims != getattr(self, "_claims_seen", {}):
                 self._claims_seen = claims
                 if hasattr(self, "summary_tab"):
                     self._refresh_summary()
-            # Aula haetaan omalla kutsullaan, mutta vain kun se on katsottavana.
+            # The lobby is fetched by its own call, but only while it is being looked at.
             if self._lobby_visible():
                 self._refresh_lobby()
         self._poll_job = self.root.after(delay, self._poll)
@@ -2669,17 +2669,17 @@ class MegaEmpiresApp:
             self._refresh_header()
 
     def _refresh_state(self) -> None:
-        """Hae tuore tilannekuva palvelulta. Palvelu tallentaa itse."""
+        """Fetch a fresh snapshot from the service. The service persists by itself."""
 
         if self.service is not None:
             self.game = self.service.snapshot()
 
     def _player(self, civilization: str) -> PlayerState | None:
-        """Etsi pelaaja tuoreesta tilannekuvasta.
+        """Find a player in the current snapshot.
 
-        Painikkeiden lambdat sulkevat sisäänsä piirtohetken pelaajaolion, joka on
-        kopio. Arvo luetaan siksi aina nimen perusteella nykyisestä
-        tilannekuvasta eikä sulkeuman kopiosta.
+        Button lambdas close over the player object as it was at draw time,
+        which is a copy. The value is therefore always looked up by name in the
+        current snapshot rather than read from the closure's copy.
         """
 
         if self.game is None:
@@ -2694,21 +2694,20 @@ class MegaEmpiresApp:
         command: Callable[[], object],
         parent: tk.Misc | None = None,
     ) -> bool:
-        """Suorita palvelun komento ja näytä hylkäys käyttäjälle.
+        """Run a service command and show any rejection to the user.
 
-        Palauttaa True jos komento hyväksyttiin. Dialogit sulkeutuvat vain
-        silloin, jotta hylätty tallennus ei katoa näkyvistä.
+        Returns True if the command was accepted. Dialogs close only then, so
+        a rejected save does not disappear from view.
 
-        expected_versionia ei vielä välitetä: työpöytäsovellus on toistaiseksi
-        ainoa kirjoittaja. Se kytketään kun RemoteGameService ja puhelimet
-        tulevat mukaan.
+        expected_version is not passed yet: the desktop app is so far the only
+        writer. It gets wired up when RemoteGameService and the phones arrive.
         """
 
         try:
             command()
         except VersionConflict:
-            # Joku muu ehti ensin. Oikea vastaus ei ole virheilmoitus vaan tuore
-            # näkymä: automaattinen uudelleenyritys yliajaisi toisen muutoksen.
+            # Someone else got there first. The right answer is not an error but a fresh
+            # view: an automatic retry would overwrite the other person's change.
             self._refresh_state()
             self._refresh_all()
             messagebox.showinfo(
@@ -2727,8 +2726,8 @@ class MegaEmpiresApp:
             )
             return False
         except ServiceUnavailable as error:
-            # Katko ei ole hylkäys: tila palvelimella on yhä se mitä se oli.
-            # Käyttäjän on silti tiedettävä ettei muutos mennyt perille.
+            # An outage is not a rejection: the state on the server is still what it was.
+            # The user still has to know the change did not get through.
             messagebox.showerror(
                 "Not connected to the server",
                 "The change was not saved — the server could not be reached.\n\n"
@@ -2829,7 +2828,7 @@ class MegaEmpiresApp:
 
     def _build_main_view(self) -> None:
         self._teardown_view()
-        # Rivien widget-viittaukset osoittavat juuri tuhottuihin olioihin.
+        # The rows' widget references point at just-destroyed objects.
         self._row_order = None
         self._row_widgets = {}
         self._sequence_shell = None
@@ -2902,8 +2901,8 @@ class MegaEmpiresApp:
         self.notebook.add(self.summary_tab, text="Scoreboard")
         self.notebook.add(self.ast_tab, text="A.S.T.")
         self.notebook.add(self.sequence_tab, text="Sequence of Play")
-        # Aula on olemassa vain kun peli on palvelimella: paikallisessa pelissä
-        # ei ole liittymistä eikä paikkoja jaettavaksi.
+        # The lobby exists only when the game is on the server: a local game has no
+        # joining and no seats to hand out.
         self.lobby_tab = None
         if isinstance(self.service, RemoteGameService):
             self.lobby_tab = ttk.Frame(self.notebook)
@@ -2941,12 +2940,11 @@ class MegaEmpiresApp:
             self._new_game()
 
     def _refresh_all(self) -> None:
-        """Päivitä otsikko ja näkyvä välilehti; piilossa olevat jäävät jonoon.
+        """Refresh the header and the visible tab; hidden ones are queued.
 
-        A.S.T.- ja Sequence-välilehdet piirretään yhä kokonaan uudelleen, mikä
-        maksaa yhdessä yli sata millisekuntia. Piilossa olevan välilehden
-        piirtäminen on tuo hinta ilman mitään hyötyä, joten se lykätään siihen
-        asti kun välilehti oikeasti näytetään.
+        The A.S.T. and Sequence tabs are still redrawn wholesale, which costs
+        over a hundred milliseconds between them. Drawing a hidden tab is that
+        cost for no benefit, so it is deferred until the tab is actually shown.
         """
 
         if self.game is None:
@@ -3044,13 +3042,13 @@ class MegaEmpiresApp:
             self._refresh_all()
 
     def _refresh_summary(self) -> None:
-        """Päivitä pistetaulu.
+        """Refresh the scoreboard.
 
-        Rivit rakennetaan vain kerran. Aiemmin jokainen napinpainallus tuhosi ja
-        loi uudelleen lähes 500 widgetiä, mikä maksoi 18 pelaajalla yli sekunnin
-        — jokainen widgetin luonti ja tuho on Tcl-kutsu. Rivien järjestys on
-        kiinteä A.S.T.-ranking, joten ne eivät koskaan liiku ja pelkkä tekstien
-        päivitys riittää.
+        The rows are built only once. Every button press used to destroy and
+        recreate nearly 500 widgets, which cost over a second at 18 players —
+        each widget creation and destruction is a Tcl call. The row order is
+        the fixed A.S.T. ranking, so rows never move and updating the labels is
+        enough.
         """
 
         if self.game is None:
@@ -3061,7 +3059,7 @@ class MegaEmpiresApp:
         if getattr(self, "_row_order", None) != order:
             self._build_summary_rows(ordered, rankings)
             return
-        # focus_get() on Tcl-kutsu, joten se kysytään kerran eikä riviä kohti.
+        # focus_get() is a Tcl call, so it is asked once rather than per row.
         focused = self.root.focus_get()
         for player in ordered:
             self._update_player_row(
@@ -3073,7 +3071,7 @@ class MegaEmpiresApp:
         ordered: list[PlayerState],
         rankings: dict[str, int],
     ) -> None:
-        """Rakenna rivit alusta. Vain pelin avaus tai pelaajajoukon muutos."""
+        """Build the rows from scratch. Only on opening a game or a change of players."""
 
         for child in self.summary_tab.winfo_children():
             child.destroy()
@@ -3240,11 +3238,11 @@ class MegaEmpiresApp:
         ).pack()
 
     def _row_subtitle(self, player: PlayerState) -> str:
-        """Rivin alateksti; etätilassa mukana puhelimen tila.
+        """The row's subtitle; in remote mode it includes the phone status.
 
-        Näytetään myös silloin kun puhelinta EI ole: pelinjohtajan on tiedettävä
-        kenen tiedot hän kirjaa itse, ja se on tärkeämpi tieto kuin se kuka
-        pärjää omillaan.
+        Shown also when there is NO phone: the game master needs to know whose
+        data they are entering themselves, and that matters more than knowing
+        who is managing on their own.
         """
 
         parts = [player.block, f"{len(player.advances)} Advances"]
@@ -3270,10 +3268,10 @@ class MegaEmpiresApp:
         return f"{player.ast_step} / {score.ast} VP"
 
     def _set_row_text(self, widgets: dict, key: str, value: str) -> None:
-        """Kirjoita lappuun vain jos teksti tosiasiassa muuttui.
+        """Write to a label only if the text actually changed.
 
-        Vertailu tehdään Pythonissa välimuistista, koska sekä `cget` että
-        `configure` ovat Tcl-kutsuja. Muuttumaton rivi ei siis maksa mitään.
+        The comparison is made in Python against a cache, because both `cget`
+        and `configure` are Tcl calls. An unchanged row therefore costs nothing.
         """
 
         if widgets["cache"].get(key) == value:
@@ -3299,7 +3297,7 @@ class MegaEmpiresApp:
         self._set_row_text(widgets, "cities", str(player.cities))
         self._set_row_text(widgets, "ast", self._row_ast_text(player, score))
 
-        # Census-kenttää ei kirjoiteta yli sillä hetkellä kun siihen kirjoitetaan.
+        # The Census field is not overwritten at the moment it is being typed into.
         if focused is not None and focused is widgets["census_entry"]:
             return
         census = str(player.census)
@@ -3314,10 +3312,10 @@ class MegaEmpiresApp:
         decrement: Callable[[], None],
         increment: Callable[[], None],
     ) -> tuple[tk.Frame, tk.Label]:
-        """Palauta kehys ja arvolapun viittaus.
+        """Return the frame and a reference to the value label.
 
-        Rivit rakennetaan kerran ja päivitetään paikallaan, joten kutsujan on
-        saatava kiinni siitä lapusta jonka teksti myöhemmin muuttuu.
+        Rows are built once and updated in place, so the caller has to keep
+        hold of the label whose text will change later.
         """
         frame = tk.Frame(parent, background=PANEL_ALT)
         tk.Label(
@@ -3414,10 +3412,10 @@ class MegaEmpiresApp:
         player: PlayerState,
         value: tk.StringVar,
     ) -> None:
-        """Tyhjä kenttä palautuu nykyiseen arvoon, muuten kirjataan muutos.
+        """An empty field reverts to the current value, otherwise the change is saved.
 
-        Arvo luetaan tuoreesta tilannekuvasta: rivi rakennetaan vain kerran,
-        joten sulkeuman `player` on piirtohetken kopio.
+        The value is read from the current snapshot: a row is built only once,
+        so the closure's `player` is a copy from draw time.
         """
 
         if value.get() != "":
@@ -3432,11 +3430,12 @@ class MegaEmpiresApp:
         player: PlayerState,
         value: tk.StringVar,
     ) -> None:
-        """Viivytä kirjausta, kunnes kirjoittaminen tauko.
+        """Delay the write until typing pauses.
 
-        Ilman tätä "45" lähettäisi kaksi komentoa, joista ensimmäinen asettaisi
-        Censusiksi 4. Paikallisesti se olisi vain turhaa lokia, verkon yli se
-        olisi pyyntö per merkki ja välitila näkyisi hetken muille asiakkaille.
+        Without this, "45" would send two commands, the first setting Census to
+        4. Locally that would only be noise in the log; over the network it
+        would be a request per character, and the intermediate value would
+        briefly be visible to every other client.
         """
 
         jobs = getattr(self, "_census_jobs", None)
@@ -3472,11 +3471,11 @@ class MegaEmpiresApp:
         )
 
     def _refresh_sequence(self) -> None:
-        """Päivitä Sequence of Play.
+        """Refresh the Sequence of Play.
 
-        Kuori rakennetaan kerran ja paneelit vain kun niiden sisältö muuttuu.
-        Aiemmin koko välilehti tuhottiin ja piirrettiin uudelleen: 18 pelaajalla
-        se maksoi ~100 ms, ja etätilassa kysely osuu parin sekunnin välein.
+        The shell is built once and the panels only when their content changes.
+        The whole tab used to be destroyed and redrawn: at 18 players that cost
+        ~100 ms, and in remote mode the poll fires every couple of seconds.
         """
 
         if self.game is None:
@@ -3491,7 +3490,8 @@ class MegaEmpiresApp:
             child.destroy()
         self._phase_buttons: dict[int, tk.Button] = {}
         self._sequence_rules_phase = None
-        # Ei _sequence_signature: se on metodin nimi, ja attribuutti peittäisi sen.
+        # Not _sequence_signature: that is the method's name, and an attribute would
+        # shadow it.
         self._sequence_signature_value = None
 
         content = ttk.Frame(self.sequence_tab, padding=(18, 12, 18, 18))
@@ -3549,8 +3549,8 @@ class MegaEmpiresApp:
             style="Accent.TButton",
             command=lambda: self._change_phase(1),
         ).pack(side="right")
-        # Omat isäntäkehykset, jotta säännöt ja erittely voidaan tyhjentää
-        # koskematta navigointipainikkeisiin.
+        # Separate host frames, so the rules and the detail panel can be cleared
+        # without touching the navigation buttons.
         self._sequence_rules_host = tk.Frame(summary, background=PANEL)
         self._sequence_rules_host.pack(fill="both", expand=True)
 
@@ -3561,11 +3561,11 @@ class MegaEmpiresApp:
         self._sequence_shell = content
 
     def _sequence_signature(self, phase: Phase) -> tuple:
-        """Kaikki mitä erittelypaneeli näyttää, vertailtavassa muodossa.
+        """Everything the detail panel renders, in a comparable form.
 
-        Useimmat komennot eivät muuta juuri katsottavan vaiheen sisältöä —
-        Census vaikuttaa vaiheeseen 3, kaupungit vaiheeseen 6 — joten
-        allekirjoitus säästää valtaosan uudelleenpiirroista.
+        Most commands do not change the content of the phase being looked at —
+        Census affects phase 3, cities phase 6 — so the signature saves the
+        great majority of redraws.
         """
 
         ordered = phase_order(phase, self.game.players)
@@ -3599,7 +3599,7 @@ class MegaEmpiresApp:
                 activeforeground="#101010" if selected else TEXT,
             )
 
-        # Oletussäännöt riippuvat vain vaiheesta.
+        # The default rules depend on the phase alone.
         if self._sequence_rules_phase != current.number:
             for child in self._sequence_rules_host.winfo_children():
                 child.destroy()
@@ -4112,7 +4112,7 @@ class MegaEmpiresApp:
         return phase.order_summary
 
     def _small_player_phase_rules(self, phase: Phase) -> tuple[str, ...]:
-        """Lisää 3–4 pelaajan West/East-skenaarion pöytämuistutukset."""
+        """Add the table reminders for the 3-4 player West/East scenario."""
 
         if (
             self.game is None
@@ -4221,11 +4221,11 @@ class MegaEmpiresApp:
             if advance_id in player.advances
         )
 
-    # ── Players / aula ──────────────────────────────────────────────────
+    # -- Players / lobby --------------------------------------------------
 
     def _lobby_visible(self) -> bool:
-        # getattr, koska _poll() käy ajastimella ja voi osua hetkeen jolloin
-        # päänäkymää ei ole vielä rakennettu.
+        # getattr, because _poll() runs on a timer and can land at a moment when the
+        # main view has not been built yet.
         tab = getattr(self, "lobby_tab", None)
         notebook = getattr(self, "notebook", None)
         if tab is None or notebook is None:
@@ -4233,14 +4233,14 @@ class MegaEmpiresApp:
         try:
             return bool(notebook.winfo_exists()) and notebook.select() == str(tab)
         except tk.TclError:
-            # Widget on ehditty tuhota kyselyn ja piirron välissä.
+            # The widget was destroyed between the poll and the draw.
             return False
 
     def _refresh_lobby(self) -> None:
-        """Näytä liittymisohje ja paikkojen tila.
+        """Show the join instructions and the state of the seats.
 
-        Rakennetaan uudelleen vain kun tila tosiasiassa muuttui: kysely käy
-        parin sekunnin välein, ja joka kerta uudelleen piirtäminen välkkyisi.
+        Rebuilt only when the state actually changed: the poll runs every
+        couple of seconds, and redrawing each time would flicker.
         """
 
         service = self.service
@@ -4293,7 +4293,7 @@ class MegaEmpiresApp:
         outer = ttk.Frame(self.lobby_tab, padding=(28, 18))
         outer.pack(fill="both", expand=True)
 
-        # Ohje on tarkoitettu luettavaksi television katseluetäisyydeltä.
+        # The instructions are meant to be read from TV viewing distance.
         banner = tk.Frame(outer, background=PANEL, highlightthickness=0)
         banner.pack(fill="x", pady=(0, 18))
         tk.Label(
@@ -4325,9 +4325,9 @@ class MegaEmpiresApp:
             foreground=ACCENT,
         ).pack(pady=(0, 10))
 
-        # Admin-koodi ei ole pöydälle luettava vaan yhdelle tai kahdelle
-        # annettava. Televisiossa jatkuvasti näkyvänä sen saisi jokainen, joten
-        # se paljastetaan vain pyydettäessä ja pienellä.
+        # The admin code is not read out to the table but given to one or two
+        # people. Permanently on the TV everyone would have it, so it is revealed
+        # only on request, and small.
         admin_row = tk.Frame(banner, background=PANEL)
         admin_row.pack(pady=(0, 16))
         shown = getattr(self, "_show_admin_code", False)
@@ -4423,9 +4423,9 @@ class MegaEmpiresApp:
                 background=PANEL,
                 foreground="#4caf6d",
             ).pack(side="right", padx=6)
-            # Kuka pystyy kirjoittamaan muidenkin riveille. Pelinjohtajan on
-            # tiedettävä se ilman että hänen tarvitsee muistaa kenelle antoi
-            # koodin.
+            # Who can write to other people's rows. The game master has to know that
+            # without having to remember who they gave the code to.
+            #
             if player.get("elevated"):
                 tk.Label(
                     outer,
@@ -4449,10 +4449,10 @@ class MegaEmpiresApp:
         self._refresh_lobby()
 
     def _release_seat(self, civilization: str) -> None:
-        """Vapauta paikka, jotta pelaaja voi liittyä uudelleen.
+        """Free a seat so the player can join again.
 
-        Tämä on ainoa reitti paikan vapauttamiseen: pelaajalla itsellään ei ole
-        sitä, koska vahingossa painettuna se lukitsisi hänet ulos kesken pelin.
+        This is the only route to releasing a seat: the player has no such
+        button, because pressed by accident it would lock them out mid-game.
         """
 
         service = self.service
@@ -4478,11 +4478,11 @@ class MegaEmpiresApp:
         self._refresh_lobby()
 
     def _refresh_ast(self) -> None:
-        """Päivitä A.S.T.-välilehti.
+        """Refresh the A.S.T. tab.
 
-        Otsikko, selite ja vaatimuspaneeli ovat kiinteitä koko pelin ajan, joten
-        ne rakennetaan kerran. Vain kangas riippuu pelitilasta, ja sekin
-        piirretään uudelleen vain kun markkereiden tilanne tosiasiassa muuttui.
+        The heading, the legend and the requirements panel are fixed for the
+        whole game, so they are built once. Only the canvas depends on game
+        state, and even that is redrawn only when the markers actually moved.
         """
 
         if self.game is None:
@@ -4561,7 +4561,7 @@ class MegaEmpiresApp:
             highlightthickness=0,
         )
         canvas.pack(side="left", fill="both", expand=True)
-        # Koon muutos vaatii piirron riippumatta siitä muuttuiko pelitila.
+        # A resize forces a redraw whether or not the game state changed.
         canvas.bind(
             "<Configure>",
             lambda _event: self._draw_ast(canvas),

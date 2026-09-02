@@ -1,4 +1,4 @@
-"""Mega Empires -peliseurannan käynnistystiedosto."""
+"""Entry point for the Mega Empires score tracker."""
 
 from src.client.ui import run
 

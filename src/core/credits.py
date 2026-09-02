@@ -1,4 +1,4 @@
-"""Civilization Advance -krediittien ja ostohintojen laskenta."""
+"""Civilization Advance credits and purchase prices."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ class AdvancePrice:
 
 
 def discount_advances(player: PlayerState, round_number: int) -> list[str]:
-    """Kortit jotka antavat alennusta tällä kierroksella.
+    """The cards that grant a discount on this turn.
 
-    Hankintavaihe on yhtäaikainen: saman kierroksen aikana ostetut kortit eivät
-    alenna toistensa hintaa, vaikka ne kirjattaisiin useassa erässä. Alennuksen
-    antavat siis vain aiempien kierrosten kortit.
+    The acquisition phase is simultaneous: cards bought on the same turn do not
+    discount each other, even when the player records them in several batches.
+    Only cards from earlier turns therefore grant a discount.
 
-    Leimaton kortti tulkitaan vanhaksi. Näin ennen tätä muutosta tallennetut
-    pelit käyttäytyvät kuten ennenkin eivätkä menetä alennuksiaan kesken pelin.
+    An unstamped card counts as old. That way games saved before this change
+    behave as they did and do not lose their discounts mid-game.
     """
 
     turns = player.advance_turns
@@ -44,7 +44,7 @@ def discount_advances(player: PlayerState, round_number: int) -> list[str]:
 
 
 def starting_color_credit(player_count: int) -> int:
-    """Palauta sääntöjen mukainen kaikille väreille annettava alkukrediitti."""
+    """Return the starting credit granted to every colour by the rules."""
 
     if player_count in {3, 5}:
         return 10
@@ -54,7 +54,7 @@ def starting_color_credit(player_count: int) -> int:
 
 
 def flexible_credit_entitlement(advance_ids: list[str]) -> int:
-    """Palauta Written Recordin ja Monumentin vapaasti jaettava krediittimäärä."""
+    """Return the freely assignable credit from Written Record and Monument."""
 
     return (
         (10 if "written_record" in advance_ids else 0)
@@ -68,10 +68,10 @@ def color_credits(
     flexible_credits: dict[str, int] | None = None,
     owned: list[str] | None = None,
 ) -> dict[str, int]:
-    """Laske aiemmin tallennettujen korttien pysyvät värikrediitit.
+    """Total the permanent colour credits of the cards already recorded.
 
-    `owned` rajaa laskennan tiettyyn korttijoukkoon; hinnoittelussa se on
-    `discount_advances()`, jotta saman kierroksen ostot eivät alenna toisiaan.
+    `owned` limits the calculation to a given set of cards; for pricing it is
+    `discount_advances()`, so same-turn purchases do not discount each other.
     """
 
     base = starting_color_credit(player_count)
@@ -97,7 +97,7 @@ def special_credit(
     target_advance_id: str,
     owned_advance_ids: list[str],
 ) -> int:
-    """Laske saman referenssirivin 10/20 pisteen erityisalennus."""
+    """The 10/20 point row-chain discount from the same reference row."""
 
     owned = set(owned_advance_ids)
     for low, middle, high in ADVANCE_CHAINS:
@@ -115,13 +115,14 @@ def advance_price(
     flexible_credits: dict[str, int] | None = None,
     owned: list[str] | None = None,
 ) -> AdvancePrice:
-    """Laske kortin hinta aiemmin tallennetuilla krediiteillä.
+    """Price a card against the credits already recorded.
 
-    Kaksivärisellä kortilla käytetään vain suurempaa värikrediittiä.
+    A two-colour card uses only the larger of its two colour credits, never
+    the sum.
 
-    `owned` on se korttijoukko joka antaa alennusta. Kutsujan pitää antaa siihen
-    `discount_advances(player, round_number)`, muuten saman kierroksen ostot
-    alentavat toisiaan — mitä säännöt eivät salli.
+    `owned` is the set of cards that grants the discount. The caller must pass
+    `discount_advances(player, round_number)` there, otherwise same-turn
+    purchases discount each other — which the rules do not allow.
     """
 
     totals = color_credits(player, player_count, flexible_credits, owned)

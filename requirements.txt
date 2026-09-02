@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 
-# Tarvitaan fastapi.testclientille, jota deploy.sh:n testiportti käyttää.
-# Versio on poimittu palvelimen venvistä (Python 3.10), joka on se ympäristö
-# jolla on merkitystä.
+# Needed by fastapi.testclient, which deploy.sh's test gate uses.
+# The version was taken from the server's venv (Python 3.10), which is the
+# environment that matters.
 httpx==0.28.1

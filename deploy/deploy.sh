@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Päivitä palvelimen sovellus git-remotesta ja käynnistä palvelu uudelleen.
-# Ajetaan sovelluskäyttäjänä (megaempires), ei rootina.
+# Update the server's application from the git remote and restart the service.
+# Run as the application user (megaempires), not as root.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/home/megaempires/mega-empires-backend}"
@@ -12,10 +12,10 @@ SYSTEMCTL="/usr/bin/systemctl"
 INSTALLED_UNIT="/etc/systemd/system/$SERVICE"
 
 check_unit_drift() {
-    # Deploy ei voi asentaa unit-tiedostoa: sovelluskäyttäjän sudo-oikeus on
-    # rajattu pelkkään uudelleenkäynnistykseen. Muutos jäisi siis repoon ilman
-    # että se tulee voimaan, eikä mikään kertoisi siitä — sama hiljainen
-    # epäonnistuminen kuin aiemmalla skip-worktree-viritelmällä.
+    # The deploy cannot install the unit file: the application account's sudo
+    # right is limited to restarting alone. A change would therefore sit in the
+    # repo without taking effect, and nothing would say so — the same silent
+    # failure as the old skip-worktree arrangement.
     local repo_unit="$APP_DIR/deploy/mega-empires-backend.service"
     [ -f "$repo_unit" ] && [ -r "$INSTALLED_UNIT" ] || return 0
     if cmp -s "$repo_unit" "$INSTALLED_UNIT"; then
@@ -23,8 +23,8 @@ check_unit_drift() {
     fi
     echo
     echo "======================================================================"
-    echo " HUOM: repon unit-tiedosto eroaa käytössä olevasta."
-    echo " Palvelu käynnistyi VANHALLA unitilla. Aja admin-tunnuksella:"
+    echo " NOTE: the repo's unit file differs from the installed one."
+    echo " The service restarted with the OLD unit. Run as an admin account:"
     echo
     echo "   sudo cp $repo_unit \\"
     echo "           $INSTALLED_UNIT"
@@ -36,14 +36,14 @@ check_unit_drift() {
 
 cd "$APP_DIR"
 
-# Palvelimella ei pidä olla paikallisia muutoksia: ne katoaisivat huomaamatta.
+# The server should have no local changes: they would disappear unnoticed.
 if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "VIRHE: työhakemistossa on committoimattomia muutoksia." >&2
+    echo "ERROR: the working tree has uncommitted changes." >&2
     git status --short >&2
     exit 1
 fi
 
-echo "== Haetaan origin/$BRANCH =="
+echo "== Fetching origin/$BRANCH =="
 git fetch --prune origin
 previous_revision="$(git rev-parse HEAD)"
 git checkout "$BRANCH"
@@ -51,35 +51,35 @@ git merge --ff-only "origin/$BRANCH"
 current_revision="$(git rev-parse HEAD)"
 
 if [ "$previous_revision" = "$current_revision" ]; then
-    echo "Ei uusia commiteja (${current_revision:0:8})."
+    echo "No new commits (${current_revision:0:8})."
 else
     echo "${previous_revision:0:8} -> ${current_revision:0:8}"
 fi
 
-# Riippuvuudet asennetaan vain jos requirements.txt on muuttunut.
+# Dependencies are installed only when requirements.txt has changed.
 if [ -f requirements.txt ] && ! git diff --quiet \
         "$previous_revision" "$current_revision" -- requirements.txt; then
-    echo "== Asennetaan riippuvuudet =="
+    echo "== Installing dependencies =="
     "$VENV_DIR/bin/pip" install --upgrade -r requirements.txt
 fi
 
-# Testiportti: tests/test_ui.py ohittaa itsensä, koska palvelimella ei ole
-# tkinteriä. Muut testit ajetaan ja epäonnistuminen estää uudelleenkäynnistyksen.
-echo "== Testit =="
+# The test gate: tests/test_ui.py skips itself because the server has no
+# tkinter. The rest run, and a failure prevents the restart.
+echo "== Tests =="
 if ! "$VENV_DIR/bin/python" -m unittest discover -q; then
-    echo "VIRHE: testit epäonnistuivat, palvelua ei käynnistetä uudelleen." >&2
+    echo "ERROR: tests failed, the service will not be restarted." >&2
     exit 1
 fi
 
-echo "== Käynnistetään $SERVICE uudelleen =="
+echo "== Restarting $SERVICE =="
 sudo "$SYSTEMCTL" restart "$SERVICE"
 sleep 2
 
 if "$SYSTEMCTL" is-active --quiet "$SERVICE"; then
-    echo "OK: palvelu on käynnissä revisiossa ${current_revision:0:8}."
+    echo "OK: the service is running at revision ${current_revision:0:8}."
     check_unit_drift
 else
-    echo "VIRHE: palvelu ei käynnistynyt." >&2
-    echo "Katso loki: journalctl -u $SERVICE -n 50 --no-pager" >&2
+    echo "ERROR: the service did not start." >&2
+    echo "Check the log: journalctl -u $SERVICE -n 50 --no-pager" >&2
     exit 1
 fi

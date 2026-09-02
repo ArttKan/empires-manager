@@ -1,11 +1,11 @@
-"""Calamity-korttien Sequence of Play -näkymässä tarvittavat tiedot."""
+"""Calamity card data needed by the Sequence of Play view."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
 class MinorCalamity:
-    """Minor Calamity ja sen paikka Trade Card -pakoissa."""
+    """A Minor Calamity and its place in the Trade Card decks."""
 
     stack: int
     name: str
@@ -14,7 +14,7 @@ class MinorCalamity:
 
 @dataclass(frozen=True, slots=True)
 class MajorCalamity:
-    """Major Calamity resoluution mukaisessa järjestyksessä."""
+    """A Major Calamity, in resolution order."""
 
     stack: int
     name: str
@@ -56,8 +56,8 @@ MINOR_CALAMITIES = (
 )
 
 
-# Pakan numero määrää resoluutiojärjestyksen. Saman pakan Non-Tradeable
-# ratkaistaan aina ennen Tradeable-korttia.
+# The deck number decides the resolution order. Within one deck the
+# Non-Tradeable card is always resolved before the Tradeable one.
 MAJOR_CALAMITIES = (
     MajorCalamity(2, "Volcanic Eruption", False),
     MajorCalamity(2, "Treachery", True),
