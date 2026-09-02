@@ -1,0 +1,15 @@
+# Docker does NOT read .gitignore. Without this file the local secrets and every
+# saved game would be copied into an image layer.
+.git
+.gitignore
+.venv
+tallennukset/
+empiressecrets.txt
+__pycache__/
+*.py[cod]
+
+# Not needed at runtime.
+README.md
+CLAUDE.md
+app.py
+configure.py

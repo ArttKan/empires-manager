@@ -1,0 +1,50 @@
+# Rootless Docker, run as the megaempires account.
+#
+#   docker compose build     # runs the tests; a failure changes nothing
+#   docker compose up -d
+#
+# The app publishes no host port at all: cloudflared reaches it over the
+# internal network, so nothing on the box listens for inbound connections.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+
+    # Readable by megaempires, unlike the old root:root 0600 file. There is no
+    # root in the rootless path to read it on the service's behalf; the account
+    # receives the token in its environment either way.
+    env_file: /home/megaempires/mega-empires-backend.env
+
+    environment:
+      # storage.data_directory() resolves this at call time and falls back to
+      # the repo's tallennukset/. If it were missing here the server would run
+      # and write every game into the container's writable layer, destroyed on
+      # the next up -d, with no error anywhere.
+      MEGA_EMPIRES_DATA_DIR: /var/lib/mega-empires
+
+    volumes:
+      # The same directory the systemd unit used, so existing games and backups
+      # carry over untouched. It must be owned by megaempires.
+      - /var/lib/mega-empires:/var/lib/mega-empires
+
+    # Mirrors the unit's TimeoutStopSec=20. /events blocks shutdown, so without
+    # this `docker compose down` hangs the same way `systemctl restart` did.
+    stop_grace_period: 20s
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: /home/megaempires/cloudflared.env   # TUNNEL_TOKEN=...
+    depends_on:
+      app:
+        condition: service_healthy

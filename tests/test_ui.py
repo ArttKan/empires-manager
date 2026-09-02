@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import os
 import tempfile
@@ -7,12 +6,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# The server install is headless and has no python3-tk package. The whole
-# module is then skipped, so the suite can run on the server before starting.
-if importlib.util.find_spec("tkinter") is None:  # pragma: no cover
-    raise unittest.SkipTest("tkinter is not installed")
-
-import tkinter as tk
+# The server install is headless and the container image is slim; neither can
+# run Tk. The whole module is then skipped, so the suite passes as a deploy gate.
+#
+# The import is attempted rather than looked up with find_spec: a slim image
+# ships the tkinter package but not libtk8.6.so, so the spec exists and the
+# import still fails. find_spec only answers "is it on disk", which is not the
+# question.
+try:  # pragma: no cover
+    import tkinter as tk
+except ImportError:  # pragma: no cover
+    raise unittest.SkipTest("tkinter is not available")
 
 from src.core.models import GameState, PlayerState
 from src.client.remote import RemoteGameService
