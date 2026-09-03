@@ -3,7 +3,7 @@
 # Run as the application user (megaempires), not as root.
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/home/megaempires/mega-empires-manager}"
+APP_DIR="${APP_DIR:-/home/megaempires/mega-empires-backend}"
 BRANCH="${BRANCH:-main}"
 IMAGE="${IMAGE:-mega-empires-manager-app}"
 
