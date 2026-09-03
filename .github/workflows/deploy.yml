@@ -8,4 +8,4 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - run: /home/megaempires/mega-empires-manager/deploy.sh
+      - run: /home/megaempires/mega-empires-backend/deploy/deploy.sh
