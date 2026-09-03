@@ -43,8 +43,9 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    env_file: /home/megaempires/cloudflared.env   # TUNNEL_TOKEN=...
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - /home/megaempires/cloudflared:/etc/cloudflared:ro
     depends_on:
       app:
         condition: service_healthy
