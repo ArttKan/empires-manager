@@ -625,7 +625,7 @@ function render() {
   // player needs to see what they hold in any phase.
   const canBuy = gateOpen("advances");
   el("cards-open").textContent = !canBuy
-    ? "View new new test Advances"
+    ? "View Advances"
     : bypassing("advances") ? "Edit Advances" : "Buy Advances";
   // The gold highlight only when buying is genuinely possible; otherwise
   // muted, so the button does not tempt in a phase where it is no use.
