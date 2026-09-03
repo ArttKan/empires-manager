@@ -1,0 +1,11 @@
+# .github/workflows/deploy.yml
+name: deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - run: /home/megaempires/mega-empires-manager/deploy.sh
